@@ -6,7 +6,7 @@ import org.opalj.log.{ConsoleOPALLogger, GlobalLogContext, OPALLogger}
 import scopt.OParser
 
 import java.io.File
-import java.lang.reflect.Modifier
+import java.lang.reflect.{InvocationTargetException, Modifier}
 import java.util.ResourceBundle
 import scala.reflect.internal.util.ScalaClassLoader.URLClassLoader
 
@@ -111,7 +111,12 @@ object UsageGeneratorCli extends App {
       testProjectCallerClass.getMethods.foreach(method => {
         if (Modifier.isStatic(method.getModifiers)) {
           println("Invoking: " + method.getName)
-          method.invoke(null)
+          try {
+            method.invoke(null)
+          } catch {
+            case e: InvocationTargetException =>
+              System.err.println(method.getName + " threw " + e.getTargetException.toString)
+          }
         }
       })
 
