@@ -5,7 +5,7 @@ import de.ckuessner.opal.usagegen.generators.PublicClassUsageGenerator.generateP
 import org.opalj.ba.{CLASS, CODE, CodeElement, METHOD, METHODS, PUBLIC}
 import org.opalj.br
 import org.opalj.br.analyses.Project
-import org.opalj.br.instructions.{GETSTATIC, INVOKEVIRTUAL, LoadString, RETURN}
+import org.opalj.br.instructions.{GETSTATIC, INVOKEVIRTUAL, LoadString_W, RETURN}
 import org.opalj.br.{ClassFile, Method}
 import org.opalj.collection.immutable.RefArray
 
@@ -24,13 +24,13 @@ object UsageClassGenerator {
   }
 
   private def generateCallerClass(callerClassName: String, sinkClassName: String, methods: Seq[(String, ClassFile, Method)]): CLASS[_] = {
-    val callerMethods = methods.map { case (callerMethodName, classFile, method) =>
+    val callerMethodBodies = methods.map { case (callerMethodName, classFile, method) =>
       val instructions = if (method.isPublic && method.isStatic) {
         generatePublicStaticMethodCall(classFile, method, sinkClassName, callerMethodName)
       } else {
         List(
           GETSTATIC("java/lang/System", "out", "Ljava/io/PrintStream;"),
-          LoadString("Not implemented yet: " + classFile.fqn + "#" + method.name + generateMethodSignature(method)),
+          LoadString_W("Not implemented yet: " + classFile.fqn + "#" + method.name + generateMethodSignature(method)),
           INVOKEVIRTUAL("java/io/PrintStream", "println", "(Ljava/lang/String;)V"),
           RETURN
         )
@@ -47,7 +47,7 @@ object UsageClassGenerator {
     CLASS(
       accessModifiers = PUBLIC SUPER,
       thisType = callerClassName,
-      methods = METHODS(RefArray._UNSAFE_from(callerMethods.toArray))
+      methods = METHODS(RefArray._UNSAFE_from(callerMethodBodies.toArray))
     )
   }
 
@@ -80,7 +80,7 @@ object UsageClassGenerator {
     sb.append(classFile.thisType.fqn.replace('/', '_'))
     sb.append("__")
     sb.append(unqualifiedNamePattern.matcher(method.name).replaceAll(""))
-    sb.append('_')
+    sb.append("__")
     sb.append(uniqueMethodId)
     sb.toString()
   }
