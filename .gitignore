@@ -3,3 +3,5 @@
 .bsp
 .idea
 target
+testfiles/
+*.jar
