@@ -1,20 +1,29 @@
 package de.ckuessner.opal.usagegen.generators
 
-import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers._
-import org.opalj.br._
-import org.opalj.br.instructions._
+import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.{defaultValueForFieldType, generateSinkMethodSignature, storeInstruction}
+import org.opalj.br.instructions.{ALOAD, INVOKESTATIC, LabeledInstruction, RETURN}
+import org.opalj.br.{BaseType, ClassFile, Method, ReferenceType}
 
 import scala.collection.mutable.ListBuffer
-import scala.language.postfixOps
 
-object PublicClassUsageGenerator {
-  def generatePublicStaticMethodCall(classFileOfCalledMethod: ClassFile,
-                                     calledMethod: Method,
-                                     sinkClassName: String,
-                                     sinkMethodName: String): Seq[LabeledInstruction] = {
+object MethodCallGenerator {
+  /**
+   * Generates the bytecode for calling the specified _static_ method.
+   *
+   * @param classFileOfCalledMethod The `ClassFile` of the class the called method belongs to.
+   * @param calledMethod            The Method on the called class.
+   * @param sinkClassName           The name of the sink class that is called after calling the method.
+   * @param sinkMethodName          The name of the sink method on the sink class.
+   * @return The instructions of the caller method body
+   */
+  def generateStaticMethodCaller(classFileOfCalledMethod: ClassFile,
+                                 calledMethod: Method,
+                                 sinkClassName: String,
+                                 sinkMethodName: String): Seq[LabeledInstruction] = {
 
-    if (!(calledMethod.isPublic && calledMethod.isStatic && calledMethod.isNotAbstract)) {
-      throw new IllegalArgumentException("method must be public, static and not abstract")
+    // Check if really static, (non-abstract is implied by static)
+    if (calledMethod.isNotStatic) {
+      throw new IllegalArgumentException("method to call must be static")
     }
 
     val methodBody = ListBuffer.empty[LabeledInstruction]

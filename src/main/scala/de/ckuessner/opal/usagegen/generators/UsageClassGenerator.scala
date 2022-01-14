@@ -1,7 +1,7 @@
 package de.ckuessner.opal.usagegen.generators
 
 import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.generateMethodSignature
-import de.ckuessner.opal.usagegen.generators.PublicClassUsageGenerator.generatePublicStaticMethodCall
+import de.ckuessner.opal.usagegen.generators.MethodCallGenerator.generateStaticMethodCaller
 import org.opalj.ba.{CLASS, CODE, CodeElement, METHOD, METHODS, PUBLIC}
 import org.opalj.br
 import org.opalj.br.analyses.Project
@@ -26,7 +26,7 @@ object UsageClassGenerator {
   private def generateCallerClass(callerClassName: String, sinkClassName: String, methods: Seq[(String, ClassFile, Method)]): CLASS[_] = {
     val callerMethodBodies = methods.map { case (callerMethodName, classFile, method) =>
       val instructions = if (method.isPublic && method.isStatic) {
-        generatePublicStaticMethodCall(classFile, method, sinkClassName, callerMethodName)
+        generateStaticMethodCaller(classFile, method, sinkClassName, callerMethodName)
       } else {
         List(
           GETSTATIC("java/lang/System", "out", "Ljava/io/PrintStream;"),
