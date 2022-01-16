@@ -1,6 +1,6 @@
 package de.ckuessner.opal.usagegen
 
-import de.ckuessner.opal.usagegen.generators.{JarFileGenerator, UsageClassGenerator}
+import de.ckuessner.opal.usagegen.generators.{JarFileGenerator, UsageGenerator}
 import org.opalj.br.analyses.Project
 import org.opalj.log.{ConsoleOPALLogger, GlobalLogContext, OPALLogger}
 import scopt.OParser
@@ -82,7 +82,7 @@ object UsageGeneratorCli extends App {
     OPALLogger.updateLogger(GlobalLogContext, new ConsoleOPALLogger(true, opalLogLevel))
     val project = Project(config.projectJarFile, new ConsoleOPALLogger(true, opalLogLevel))
 
-    val (entryPointClass, callerClasses, sinkClass) = UsageClassGenerator.generateLibraryTestClasses(
+    val (entryPointClass, callerClasses, sinkClass) = UsageGenerator.generateDummyUsage(
       project
     )
 

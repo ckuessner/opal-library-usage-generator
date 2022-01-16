@@ -13,15 +13,15 @@ import java.util.regex.Pattern
 import scala.collection.mutable
 import scala.language.postfixOps
 
-object UsageClassGenerator {
+object UsageGenerator {
   // TODO: It is theoretically possible that these classes already exists in the tested library.
-  def generateLibraryTestClasses(project: Project[_],
-                                 entryPointClassPackage: Option[String] = None,
-                                 entryPointClassName: String = "___TEST_RUNNER_ENTRYPOINT___",
-                                 sinkClassName: String = "___SINK___",
-                                 sinkClassPackage: Option[String] = None,
-                                 callerClassName: String = "___DUMMY_CALLER_CLASS___"
-                                ): (CLASS[_], Iterable[CLASS[_]], CLASS[_]) = {
+  def generateDummyUsage(project: Project[_],
+                         entryPointClassPackage: Option[String] = None,
+                         entryPointClassName: String = "___TEST_RUNNER_ENTRYPOINT___",
+                         sinkClassName: String = "___SINK___",
+                         sinkClassPackage: Option[String] = None,
+                         callerClassName: String = "___DUMMY_CALLER_CLASS___"
+                        ): (CLASS[_], Iterable[CLASS[_]], CLASS[_]) = {
 
     project.classesPerPackage.map { case (packageName, classFilesInPackage) =>
       classFilesInPackage
