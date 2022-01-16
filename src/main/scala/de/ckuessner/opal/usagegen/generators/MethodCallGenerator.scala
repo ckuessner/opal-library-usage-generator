@@ -1,32 +1,34 @@
 package de.ckuessner.opal.usagegen.generators
 
 import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.{defaultValueForFieldType, generateSinkMethodSignature, storeInstruction}
-import org.opalj.br.instructions.{ALOAD, INVOKESTATIC, LabeledInstruction, RETURN}
+import org.opalj.ba.{CODE, CodeElement, InstructionElement, METHOD, PUBLIC}
+import org.opalj.br.instructions.{ALOAD, INVOKESTATIC, Instruction, RETURN}
 import org.opalj.br.{BaseType, ClassFile, Method, ReferenceType}
 
-import scala.collection.mutable.ListBuffer
+import scala.collection.mutable
 
 object MethodCallGenerator {
   /**
    * Generates the bytecode for calling the specified _static_ method.
    *
-   * @param classFileOfCalledMethod The `ClassFile` of the class the called method belongs to.
-   * @param calledMethod            The Method on the called class.
-   * @param sinkClassName           The name of the sink class that is called after calling the method.
-   * @param sinkMethodName          The name of the sink method on the sink class.
+   * @param calleeClassFile The `ClassFile` of the class the called method belongs to.
+   * @param calledMethod    The Method on the called class.
+   * @param sinkClassName   The name of the sink class that is called after calling the method.
+   * @param sinkMethodName  The name of the sink method on the sink class.
    * @return The instructions of the caller method body
    */
-  def generateStaticMethodCaller(classFileOfCalledMethod: ClassFile,
+  def generateStaticMethodCaller(callerMethodName: String,
+                                 calleeClassFile: ClassFile,
                                  calledMethod: Method,
                                  sinkClassName: String,
-                                 sinkMethodName: String): Seq[LabeledInstruction] = {
+                                 sinkMethodName: String): METHOD[_] = {
 
     // Check if really static, (non-abstract is implied by static)
     if (calledMethod.isNotStatic) {
       throw new IllegalArgumentException("method to call must be static")
     }
 
-    val methodBody = ListBuffer.empty[LabeledInstruction]
+    val methodBody = mutable.ArrayBuilder.make[CodeElement[Instruction]]
 
     // Reference types need to be stored as locals, as they are passed to sink after consumption by method call.
     // This means that we construct the default values for reference types first and store them as locals.
@@ -34,7 +36,7 @@ object MethodCallGenerator {
       .filter(parameter => parameter.isReferenceType)
       .foreachWithIndex { case (paramType, localVarIndex) =>
         // Construct default value
-        methodBody ++= defaultValueForFieldType(paramType)
+        methodBody ++= defaultValueForFieldType(paramType).map(InstructionElement)
         // Store constructed value
         methodBody += storeInstruction(paramType, localVarIndex)
       }
@@ -50,14 +52,14 @@ object MethodCallGenerator {
             localVarIndex += 1
           case _: BaseType =>
             // Place default value on stack (base types aren't constructed in prior step)
-            methodBody ++= defaultValueForFieldType(paramType)
+            methodBody ++= defaultValueForFieldType(paramType).map(InstructionElement)
         }
       }
     }
 
     // Call method of tested library
     methodBody += INVOKESTATIC(
-      declaringClass = classFileOfCalledMethod.thisType,
+      declaringClass = calleeClassFile.thisType,
       isInterface = false,
       name = calledMethod.name,
       methodDescriptor = calledMethod.descriptor
@@ -78,6 +80,12 @@ object MethodCallGenerator {
 
     // Simply return, the stack should now be empty
     methodBody += RETURN
-    methodBody
+
+    METHOD(
+      PUBLIC.STATIC,
+      callerMethodName,
+      "()V",
+      CODE(methodBody.result())
+    )
   }
 }

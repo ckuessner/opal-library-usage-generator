@@ -3,7 +3,7 @@ package de.ckuessner.opal.usagegen.generators
 import org.opalj.br._
 import org.opalj.br.instructions._
 
-import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.ArrayBuffer
 
 object ByteCodeGenerationHelpers {
   def storeInstruction(theType: Type, index: Int): StoreLocalVariableInstruction = {
@@ -28,8 +28,8 @@ object ByteCodeGenerationHelpers {
     }
   }
 
-  def defaultValueForFieldType(fieldType: FieldType): Seq[LabeledInstruction] = {
-    val code = ListBuffer.empty[LabeledInstruction]
+  def defaultValueForFieldType(fieldType: FieldType): Array[LabeledInstruction] = {
+    val code = ArrayBuffer.empty[LabeledInstruction]
 
     fieldType match {
       case _: ObjectType =>
@@ -56,7 +56,7 @@ object ByteCodeGenerationHelpers {
       case _: BooleanType => code += ICONST_0
     }
 
-    code
+    code.toArray
   }
 
   def generateMethodSignature(method: Method): String = {

@@ -1,12 +1,12 @@
 package de.ckuessner.opal.usagegen
 
-import de.ckuessner.opal.usagegen.generators.UsageClassGenerator
+import de.ckuessner.opal.usagegen.generators.{JarFileGenerator, UsageClassGenerator}
 import org.opalj.br.analyses.Project
 import org.opalj.log.{ConsoleOPALLogger, GlobalLogContext, OPALLogger}
 import scopt.OParser
 
 import java.io.File
-import java.lang.reflect.{InvocationTargetException, Modifier}
+import java.lang.reflect.InvocationTargetException
 import java.util.ResourceBundle
 import scala.reflect.internal.util.ScalaClassLoader.URLClassLoader
 
@@ -74,10 +74,6 @@ object UsageGeneratorCli extends App {
   }
 
   def run(config: Config): Unit = {
-    // TODO: remove after refactor
-    val CALLER_CLASS_NAME = "ApiCaller"
-    val SINK_CLASS_NAME = "ApiSink"
-
     // Silence Info level logs from opal
     val opalLogLevel =
       if (config.verbose) org.opalj.log.Info
@@ -86,15 +82,13 @@ object UsageGeneratorCli extends App {
     OPALLogger.updateLogger(GlobalLogContext, new ConsoleOPALLogger(true, opalLogLevel))
     val project = Project(config.projectJarFile, new ConsoleOPALLogger(true, opalLogLevel))
 
-    val (callerClass, sinkClass) = UsageClassGenerator.buildCallerWithSink(
-      project,
-      CALLER_CLASS_NAME,
-      SINK_CLASS_NAME
+    val (entryPointClass, callerClasses, sinkClass) = UsageClassGenerator.generateLibraryTestClasses(
+      project
     )
 
-    UsageClassGenerator.writeToJarFile(
+    JarFileGenerator.writeClassfilesToJarFile(
       config.outputJarFile,
-      List(callerClass, sinkClass),
+      entryPointClass :: sinkClass :: callerClasses.toList,
       config.force
     )
 
@@ -106,20 +100,14 @@ object UsageGeneratorCli extends App {
       ), null)
       ResourceBundle.clearCache(cl)
 
-      val testProjectCallerClass = cl.loadClass(CALLER_CLASS_NAME)
-
-      testProjectCallerClass.getMethods.foreach(method => {
-        if (Modifier.isStatic(method.getModifiers)) {
-          println("Invoking: " + method.getName)
-          try {
-            method.invoke(null)
-          } catch {
-            case e: InvocationTargetException =>
-              System.err.println(method.getName + " threw " + e.getTargetException.toString)
-          }
-        }
-      })
-
+      val entryPointClass = cl.loadClass("___TEST_RUNNER_ENTRYPOINT___")
+      val entryPointMethod = entryPointClass.getMethod("callCallers")
+      try {
+        entryPointMethod.invoke(null)
+      } catch {
+        case e: InvocationTargetException =>
+          System.err.println(entryPointMethod.getName + " threw " + e.getTargetException.toString)
+      }
     }
   }
 }

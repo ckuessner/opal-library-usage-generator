@@ -26,7 +26,7 @@ object SinkGenerator {
   }
 
   @inline
-  private def generateSinkMethod(methodName: String, apiMethod: Method): METHOD[_] = {
+  def generateSinkMethod(methodName: String, apiMethod: Method): METHOD[_] = {
     val descriptor = generateSinkMethodSignature(apiMethod.returnType, apiMethod.parameterTypes)
 
     METHOD(
