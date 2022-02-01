@@ -1,16 +1,12 @@
 package de.ckuessner.opal.usagegen.generators
 
-import org.opalj.ba.CLASS
+import de.ckuessner.opal.usagegen.ClassByteCode
 
 import java.io.File
-import java.nio.file.{FileAlreadyExistsException, FileSystems, Files, Path}
+import java.nio.file.{FileAlreadyExistsException, FileSystems, Files}
 
 object JarFileGenerator {
-  def writeClassFilesToJarFile(outputFilePath: Path, classes: Iterable[CLASS[_]], overwriteOutFile: Boolean): Unit = {
-    writeClassfilesToJarFile(outputFilePath.toFile, classes, overwriteOutFile)
-  }
-
-  def writeClassfilesToJarFile(outputFile: File, classes: Iterable[CLASS[_]], overwriteOutFile: Boolean): Unit = {
+  def writeClassFilesToJarFile(outputFile: File, classes: List[ClassByteCode], overwriteOutFile: Boolean): Unit = {
     if (!outputFile.getName.matches(".*\\.(jar|zip)"))
       throw new IllegalArgumentException("outputFile must end with .jar or .zip")
 
@@ -37,14 +33,12 @@ object JarFileGenerator {
     manifestOutputStream.close()
 
     // Write class files and directories to jar
-    for (classFile <- classes.map(elem => elem.toDA._1)) {
-      val rawClassFile: Array[Byte] = org.opalj.bc.Assembler(classFile)
-      val fqClassName = classFile.thisType.asJVMType
-
+    for (clazz <- classes) {
+      val jvmType = clazz.jvmClassName
       // Ensure that the directory exists in jar
-      Files.createDirectories(zipRoot.resolve(fqClassName).getParent)
+      Files.createDirectories(zipRoot.resolve(jvmType).getParent)
       // Write class to jar
-      Files.write(zipRoot.resolve(fqClassName + ".class"), rawClassFile)
+      Files.write(zipRoot.resolve(jvmType + ".class"), clazz.byteCode)
     }
 
     zipFs.close()

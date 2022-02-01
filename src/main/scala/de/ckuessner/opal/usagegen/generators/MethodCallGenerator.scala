@@ -1,9 +1,11 @@
 package de.ckuessner.opal.usagegen.generators
 
-import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.{defaultValueForFieldType, generateSinkMethodSignature, storeInstruction}
-import org.opalj.ba.{CODE, CodeElement, InstructionElement, METHOD, PUBLIC}
-import org.opalj.br.instructions.{ALOAD, INVOKESTATIC, Instruction, RETURN}
-import org.opalj.br.{BaseType, ClassFile, Method, ReferenceType}
+import de.ckuessner.opal.usagegen.FullMethodIdentifier
+import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.{defaultValueForFieldType, storeInstruction}
+import org.opalj.ba.CodeElement._
+import org.opalj.ba.{CATCH, CODE, CodeElement, InstructionElement, METHOD, PUBLIC, TRY, TRYEND}
+import org.opalj.br._
+import org.opalj.br.instructions.{ALOAD, INVOKESTATIC, RETURN}
 
 import scala.collection.mutable
 
@@ -11,24 +13,23 @@ object MethodCallGenerator {
   /**
    * Generates the bytecode for calling the specified _static_ method.
    *
-   * @param calleeClassFile The `ClassFile` of the class the called method belongs to.
-   * @param calledMethod    The Method on the called class.
-   * @param sinkClassName   The name of the sink class that is called after calling the method.
-   * @param sinkMethodName  The name of the sink method on the sink class.
+   * @param callerMethodName The name of the generated method.
+   * @param calledMethod     The method that is called by the generated method.
+   * @param sinkId           The identifier of the sink method.
+   * @param exceptionSinkId  The identifier of the exception sink method.
    * @return The instructions of the caller method body
    */
-  def generateStaticMethodCaller(callerMethodName: String,
-                                 calleeClassFile: ClassFile,
-                                 calledMethod: Method,
-                                 sinkClassName: String,
-                                 sinkMethodName: String): METHOD[_] = {
+  def generateStaticMethodCallerMethod(callerMethodName: String,
+                                       calledMethod: Method,
+                                       sinkId: FullMethodIdentifier,
+                                       exceptionSinkId: FullMethodIdentifier): METHOD[_] = {
 
     // Check if really static, (non-abstract is implied by static)
     if (calledMethod.isNotStatic) {
       throw new IllegalArgumentException("method to call must be static")
     }
 
-    val methodBody = mutable.ArrayBuilder.make[CodeElement[Instruction]]
+    val methodBody = mutable.ArrayBuilder.make[CodeElement[Nothing]]
 
     // Reference types need to be stored as locals, as they are passed to sink after consumption by method call.
     // This means that we construct the default values for reference types first and store them as locals.
@@ -57,9 +58,13 @@ object MethodCallGenerator {
       }
     }
 
+    // Surround method call in try-catch
+    val methodCallExceptionSymbol = Symbol("Library Method Call")
+    methodBody += TRY(methodCallExceptionSymbol)
+
     // Call method of tested library
     methodBody += INVOKESTATIC(
-      declaringClass = calleeClassFile.thisType,
+      declaringClass = calledMethod.classFile.thisType,
       isInterface = false,
       name = calledMethod.name,
       methodDescriptor = calledMethod.descriptor
@@ -68,17 +73,29 @@ object MethodCallGenerator {
     // The return value (if non-void) is on the stack after the method call
 
     // After execution of the above method call, the reference type parameters need to be passed to sink -> load them.
-    calledMethod.descriptor.parameterTypes
-      .filter(parameter => parameter.isReferenceType)
-      .foreachWithIndex { case (_, localVarIndex) =>
-        methodBody += ALOAD(localVarIndex)
-      }
+    methodBody ++= loadStoredReferenceTypeParametersFromLocalVariables(calledMethod.descriptor.parameterTypes)
 
     // Call sink, passing return value of called method and all pass-by-reference parameters
-    val sinkMethodSignature = generateSinkMethodSignature(calledMethod.returnType, calledMethod.parameterTypes)
-    methodBody += INVOKESTATIC(sinkClassName, isInterface = false, sinkMethodName, sinkMethodSignature)
+    val sinkMethodSignature = sinkId.signature
+    methodBody += INVOKESTATIC(sinkId.jvmClassName, isInterface = false, sinkId.methodName, sinkMethodSignature)
 
     // Simply return, the stack should now be empty
+    methodBody += RETURN
+
+    // Method call done, end try "block"
+    methodBody += TRYEND(methodCallExceptionSymbol)
+
+    // Handle Exception: pass everything to exception sink
+    methodBody += CATCH(methodCallExceptionSymbol, 0)
+    methodBody ++= loadStoredReferenceTypeParametersFromLocalVariables(calledMethod.descriptor.parameterTypes)
+
+    methodBody += INVOKESTATIC(
+      exceptionSinkId.jvmClassName,
+      isInterface = false,
+      exceptionSinkId.methodName,
+      exceptionSinkId.signature
+    )
+
     methodBody += RETURN
 
     METHOD(
@@ -87,5 +104,16 @@ object MethodCallGenerator {
       "()V",
       CODE(methodBody.result())
     )
+  }
+
+  private def loadStoredReferenceTypeParametersFromLocalVariables(parameterList: FieldTypes,
+                                                                  localVariableOffset: Int = 0
+                                                                 ): Seq[CodeElement[Nothing]] = {
+    parameterList
+      .filter(parameter => parameter.isReferenceType)
+      .zipWithIndex
+      .map[CodeElement[Nothing]] { case (_: FieldType, localVarIndex: Int) =>
+        instructionToInstructionElement(ALOAD(localVarIndex + localVariableOffset))
+      }
   }
 }

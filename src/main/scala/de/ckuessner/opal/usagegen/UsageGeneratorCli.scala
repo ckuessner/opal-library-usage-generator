@@ -1,6 +1,7 @@
 package de.ckuessner.opal.usagegen
 
-import de.ckuessner.opal.usagegen.generators.{JarFileGenerator, UsageGenerator}
+import de.ckuessner.opal.usagegen.Compilable.{generatedClassCompiler, opalClassCompiler}
+import de.ckuessner.opal.usagegen.generators.{EntryPointClassGenerator, JarFileGenerator, SinkGenerator, UsageGenerator}
 import org.opalj.br.analyses.Project
 import org.opalj.log.{ConsoleOPALLogger, GlobalLogContext, OPALLogger}
 import scopt.OParser
@@ -11,11 +12,19 @@ import java.util.ResourceBundle
 import scala.reflect.internal.util.ScalaClassLoader.URLClassLoader
 
 object UsageGeneratorCli extends App {
+
   case class Config(projectJarFile: File,
                     outputJarFile: File,
                     force: Boolean = false,
                     runBytecode: Boolean = false,
-                    verbose: Boolean = false)
+                    verbose: Boolean = false,
+                    callerClassName: String = "___DUMMY_CALLER_CLASS___",
+                    sinkClassPackage: String = "",
+                    sinkClassName: String = "___SINK___",
+                    entryPointClassPackage: String = "",
+                    entryPointClassName: String = "___TEST_RUNNER_ENTRYPOINT___",
+                    entryPointMethodName: String = "run"
+                   )
 
   val builder = OParser.builder[Config]
   val argParser = {
@@ -82,13 +91,26 @@ object UsageGeneratorCli extends App {
     OPALLogger.updateLogger(GlobalLogContext, new ConsoleOPALLogger(true, opalLogLevel))
     val project = Project(config.projectJarFile, new ConsoleOPALLogger(true, opalLogLevel))
 
-    val (entryPointClass, callerClasses, sinkClass) = UsageGenerator.generateDummyUsage(
-      project
+    // Generate caller classes that call the library functions
+    val callerClasses = UsageGenerator.generateDummyUsage(project, config.callerClassName, config.sinkClassPackage, config.sinkClassName)
+    // Generate sink class containing all sink methods from caller classes
+    val sinkClass = SinkGenerator.generateSinkClass(config.sinkClassPackage, config.sinkClassName, callerClasses)
+    // Generate entry point class that calls all caller methods (avoiding use of reflection)
+    val entryPointClass = EntryPointClassGenerator.generateEntrypointClass(
+      config.entryPointClassPackage,
+      config.entryPointClassName,
+      config.entryPointMethodName,
+      callerClasses
     )
 
-    JarFileGenerator.writeClassfilesToJarFile(
+    val compiledEntryPointClass = Compiler.compile(entryPointClass)
+    val compiledSinkClass = Compiler.compile(sinkClass)(generatedClassCompiler)
+    val compiledCallerClasses = callerClasses.map(Compiler.compile(_)(generatedClassCompiler)).toList
+    val classes = compiledEntryPointClass :: compiledSinkClass :: compiledCallerClasses
+
+    JarFileGenerator.writeClassFilesToJarFile(
       config.outputJarFile,
-      entryPointClass :: sinkClass :: callerClasses.toList,
+      classes,
       config.force
     )
 
@@ -100,8 +122,12 @@ object UsageGeneratorCli extends App {
       ), null)
       ResourceBundle.clearCache(cl)
 
-      val entryPointClass = cl.loadClass("___TEST_RUNNER_ENTRYPOINT___")
-      val entryPointMethod = entryPointClass.getMethod("callCallers")
+      val entryPointFqnClassName =
+        if (config.entryPointClassPackage.isEmpty) config.entryPointClassName
+        else config.entryPointClassPackage + '.' + config.entryPointClassName
+
+      val entryPointClass = cl.loadClass(entryPointFqnClassName)
+      val entryPointMethod = entryPointClass.getMethod(config.entryPointMethodName)
       try {
         entryPointMethod.invoke(null)
       } catch {

@@ -3,6 +3,7 @@ package de.ckuessner.opal.usagegen.generators
 import org.opalj.br._
 import org.opalj.br.instructions._
 
+import java.util.regex.Pattern
 import scala.collection.mutable.ArrayBuffer
 
 object ByteCodeGenerationHelpers {
@@ -75,23 +76,32 @@ object ByteCodeGenerationHelpers {
     descriptor.toString
   }
 
-  def generateSinkMethodSignature(apiMethodReturnType: Type, apiMethodParameterTypes: Seq[Type]): String = {
-    // Add parameters to sink method that are not base types (i.e., ignore int, double, ...)
-    val referenceTypeParams = apiMethodParameterTypes.filter {
-      case _: ReferenceType => true
-      case _: BaseType => false
-    }
-
-    var sinkMethodParams = Seq.empty[Type]
-    // Add return value of called method to sink, if not void
-    if (!apiMethodReturnType.isVoidType) {
-      sinkMethodParams = apiMethodReturnType +: referenceTypeParams
-    } else {
-      sinkMethodParams = referenceTypeParams
-    }
-
-    // returnType is void, since sinks only consume values but don't return any
-    generateMethodSignature(VoidType, sinkMethodParams)
+  /**
+   * Translates the package/class to the FQN on the JVM.
+   *
+   * E.g.: packageName="java.lang", className="String" -> "java/lang/String"
+   *
+   * @param packageName The package name in dot-notation or ´""´ for default package
+   * @param className   The name of the class in the package
+   * @return The FQN class string in slash-notation
+   */
+  def packageAndClassToJvmClassName(packageName: String = "", className: String): String = {
+    if (packageName.isEmpty) className
+    else packageName.replace(".", "/") + "/" + className
   }
 
+  val unqualifiedNameIllegalCharsPattern: Pattern = Pattern.compile("[.;\\[/<>]")
+  val fqnIllegalCharsPattern: Pattern = Pattern.compile("[;\\[/<>]")
+
+  def generateCallerMethodName(classFile: ClassFile, method: Method, uniqueMethodId: Int): String = {
+    // Note: Does not work for constructor (because of <,> in <init> and <clinit>
+    // Restrictions on names described in https://docs.oracle.com/javase/specs/jvms/se17/html/jvms-4.html#jvms-4.2.2
+    val sb = new StringBuilder()
+    sb.append(classFile.thisType.fqn.replace('/', '_'))
+    sb.append("__")
+    sb.append(unqualifiedNameIllegalCharsPattern.matcher(method.name).replaceAll(""))
+    sb.append("__")
+    sb.append(uniqueMethodId)
+    sb.toString()
+  }
 }
