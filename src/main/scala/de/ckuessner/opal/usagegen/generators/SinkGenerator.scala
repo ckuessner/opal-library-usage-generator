@@ -1,12 +1,12 @@
 package de.ckuessner.opal.usagegen.generators
 
 import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.generateMethodSignature
-import de.ckuessner.opal.usagegen.{CallerClass, SinkClass}
-import org.opalj.ba.{CLASS, CODE, METHOD, METHODS, PUBLIC}
+import de.ckuessner.opal.usagegen.{CallerClass, FullMethodIdentifier, SinkClass, SinkMethod}
+import org.opalj.ba.{CODE, METHOD, PUBLIC}
 import org.opalj.br._
 import org.opalj.br.instructions.RETURN
-import org.opalj.collection.immutable.RefArray
 
+import scala.collection.mutable
 import scala.language.postfixOps
 
 object SinkGenerator {
@@ -29,50 +29,55 @@ object SinkGenerator {
     SinkClass(packageName, className, sinkMethods)
   }
 
-  def generateSinkClass(sinkClassName: String, methods: Seq[(String, ClassFile, Method)]): CLASS[_] = {
-    CLASS(
-      accessModifiers = PUBLIC SUPER,
-      thisType = sinkClassName,
-      methods = new METHODS(generateSinkMethods(methods))
-    )
-  }
+  def generateSinkMethod(sinkClassPackage: String,
+                         sinkClassName: String,
+                         sinkMethodName: String,
+                         apiMethod: Method
+                        ): SinkMethod = {
 
-  private def generateSinkMethods[T](methods: Seq[(String, ClassFile, Method)]): RefArray[METHOD[T]] = {
-    RefArray._UNSAFE_from(
-      methods.map { case (methodName, _, apiMethod) =>
-        generateSinkMethod(methodName, apiMethod)
-      }.toArray
-    )
-  }
-
-  def generateSinkMethod(methodName: String, apiMethod: Method): METHOD[_] = {
-    val descriptor = generateSinkMethodSignature(apiMethod.returnType, apiMethod.parameterTypes)
-
-    METHOD(
-      PUBLIC STATIC,
-      methodName,
-      descriptor,
-      CODE(RETURN)
-    )
-  }
-
-  def generateExceptionSinkMethod(methodName: String, apiMethod: Method): METHOD[_] = {
-    val descriptor = generateSinkMethodSignature(Type(classOf[Throwable]), apiMethod.parameterTypes)
-
-    METHOD(
-      PUBLIC STATIC,
-      methodName,
-      descriptor,
-      CODE(RETURN)
-    )
-  }
-
-  def generateSinkMethodSignature(apiMethodReturnType: Type, apiMethodParameterTypes: Seq[Type]): String = {
-    // Add parameters to sink method that are not base types (i.e., ignore int, double, ...)
-    val referenceTypeParams = apiMethodParameterTypes.filter {
-      case _: ReferenceType => true
-      case _: BaseType => false
+    var returnType = apiMethod.returnType
+    // If the method is a constructor method, pass the instantiated object to the sink
+    if (apiMethod.isConstructor) {
+      returnType = apiMethod.classFile.thisType
     }
+
+    val descriptor = generateSinkMethodSignature(returnType, apiMethod.parameterTypes)
+    generateSinkMethod(sinkClassPackage, sinkClassName, sinkMethodName, descriptor)
+  }
+
+  def generateExceptionSinkMethod(sinkClassPackage: String,
+                                  sinkClassName: String,
+                                  sinkMethodName: String,
+                                  apiMethod: Method
+                                 ): SinkMethod = {
+
+    val descriptor = generateSinkMethodSignature(Type(classOf[Throwable]), apiMethod.parameterTypes)
+    generateSinkMethod(sinkClassPackage, sinkClassName, sinkMethodName, descriptor)
+  }
+
+  private def generateSinkMethod(sinkClassPackage: String,
+                                 sinkClassName: String,
+                                 sinkMethodName: String,
+                                 descriptor: String
+                                ): SinkMethod = {
+
+    // Sink method body
+    val sinkMethodBody = METHOD(
+      PUBLIC STATIC,
+      sinkMethodName,
+      descriptor,
+      CODE(RETURN)
+    )
+
+    // Sink method identifiers
+    val sinkMethodId = FullMethodIdentifier(sinkClassPackage, sinkClassName, sinkMethodName, descriptor)
+
+    SinkMethod(sinkMethodId, sinkMethodBody)
+  }
+
+  private def generateSinkMethodSignature(apiMethodReturnType: Type, apiMethodParameterTypes: Seq[Type]): String = {
+    // Add parameters to sink method that are not base types (i.e., ignore int, double, ...)
+    val referenceTypeParams = apiMethodParameterTypes.filter(_.isReferenceType)
 
     var sinkMethodParams = Seq.empty[Type]
     // Add return value of called method to sink, if not void

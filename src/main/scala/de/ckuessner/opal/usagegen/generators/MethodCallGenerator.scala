@@ -1,11 +1,11 @@
 package de.ckuessner.opal.usagegen.generators
 
 import de.ckuessner.opal.usagegen.FullMethodIdentifier
-import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.{defaultValueForFieldType, storeInstruction}
+import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.{defaultValueForFieldType, tryCatchBlock}
 import org.opalj.ba.CodeElement._
-import org.opalj.ba.{CATCH, CODE, CodeElement, InstructionElement, METHOD, PUBLIC, TRY, TRYEND}
+import org.opalj.ba.{CODE, CodeElement, METHOD, PUBLIC}
 import org.opalj.br._
-import org.opalj.br.instructions.{ALOAD, INVOKESTATIC, RETURN}
+import org.opalj.br.instructions.{ALOAD, ALOAD_0, ASTORE, ASTORE_0, DUP, INVOKESPECIAL, INVOKESTATIC, NEW, RETURN}
 
 import scala.collection.mutable
 
@@ -31,39 +31,12 @@ object MethodCallGenerator {
 
     val methodBody = mutable.ArrayBuilder.make[CodeElement[Nothing]]
 
-    // Reference types need to be stored as locals, as they are passed to sink after consumption by method call.
-    // This means that we construct the default values for reference types first and store them as locals.
-    calledMethod.descriptor.parameterTypes
-      .filter(parameter => parameter.isReferenceType)
-      .foreachWithIndex { case (paramType, localVarIndex) =>
-        // Construct default value
-        methodBody ++= defaultValueForFieldType(paramType).map(InstructionElement)
-        // Store constructed value
-        methodBody += storeInstruction(paramType, localVarIndex)
-      }
-
-    // Load/construct parameters for method call
-    {
-      var localVarIndex = 0 // Stores the next index for a reference type parameter
-      for (paramType <- calledMethod.descriptor.parameterTypes) {
-        paramType match {
-          case _: ReferenceType =>
-            // Load parameter (since it's a reference type and was already constructed in the prior step)
-            methodBody += ALOAD(localVarIndex)
-            localVarIndex += 1
-          case _: BaseType =>
-            // Place default value on stack (base types aren't constructed in prior step)
-            methodBody ++= defaultValueForFieldType(paramType).map(InstructionElement)
-        }
-      }
-    }
-
-    // Surround method call in try-catch
-    val methodCallExceptionSymbol = Symbol("Library Method Call")
-    methodBody += TRY(methodCallExceptionSymbol)
+    // Load default parameters onto stack, store reference types as locals to pass to sink after call
+    methodBody ++= createDefaultParametersAndStoreReferenceTypesToLocalVariables(calledMethod.parameterTypes)
 
     // Call method of tested library
-    methodBody += INVOKESTATIC(
+    val methodCallCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
+    methodCallCode += INVOKESTATIC(
       declaringClass = calledMethod.classFile.thisType,
       isInterface = false,
       name = calledMethod.name,
@@ -71,32 +44,19 @@ object MethodCallGenerator {
     )
 
     // The return value (if non-void) is on the stack after the method call
-
-    // After execution of the above method call, the reference type parameters need to be passed to sink -> load them.
-    methodBody ++= loadStoredReferenceTypeParametersFromLocalVariables(calledMethod.descriptor.parameterTypes)
-
-    // Call sink, passing return value of called method and all pass-by-reference parameters
-    val sinkMethodSignature = sinkId.signature
-    methodBody += INVOKESTATIC(sinkId.jvmClassName, isInterface = false, sinkId.methodName, sinkMethodSignature)
-
-    // Simply return, the stack should now be empty
-    methodBody += RETURN
-
-    // Method call done, end try "block"
-    methodBody += TRYEND(methodCallExceptionSymbol)
+    methodCallCode ++= loadReferenceTypeParametersAndCallSinkAndReturn(calledMethod.parameterTypes, sinkId)
 
     // Handle Exception: pass everything to exception sink
-    methodBody += CATCH(methodCallExceptionSymbol, 0)
-    methodBody ++= loadStoredReferenceTypeParametersFromLocalVariables(calledMethod.descriptor.parameterTypes)
+    val exceptionHandlingCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]()
+    exceptionHandlingCode += ASTORE_0
+    exceptionHandlingCode += ALOAD_0
+    exceptionHandlingCode ++= loadReferenceTypeParametersAndCallSinkAndReturn(calledMethod.parameterTypes, exceptionSinkId)
 
-    methodBody += INVOKESTATIC(
-      exceptionSinkId.jvmClassName,
-      isInterface = false,
-      exceptionSinkId.methodName,
-      exceptionSinkId.signature
+    methodBody ++= tryCatchBlock(
+      methodCallCode.result(),
+      exceptionHandlingCode.result(),
+      Symbol("Method Call")
     )
-
-    methodBody += RETURN
 
     METHOD(
       PUBLIC.STATIC,
@@ -106,14 +66,165 @@ object MethodCallGenerator {
     )
   }
 
+  /**
+   * Generates the bytecode for constructing an object without calling a constructor
+   *
+   * @param callerMethodName The name of the generated method.
+   * @param classFile        The classFile of the constructed object
+   * @param sinkId           The identifier of the sink method.
+   * @return The instructions of the caller method body
+   */
+  def generateAllocationWithoutCallingConstructorMethod(callerMethodName: String,
+                                                        classFile: ClassFile,
+                                                        sinkId: FullMethodIdentifier,
+                                                        exceptionSinkId: FullMethodIdentifier
+                                                       ): METHOD[_] = {
+
+    val constructionCode = Array[CodeElement[Nothing]](
+      // Only create object using new, the static initializer is called implicitly
+      NEW(classFile.thisType),
+      // Pass reference to sink
+      INVOKESTATIC(
+        sinkId.jvmClassName,
+        isInterface = false,
+        sinkId.methodName,
+        sinkId.signature
+      ),
+      RETURN
+    )
+
+    val exceptionHandlerCode = Array[CodeElement[Nothing]](
+      INVOKESTATIC(
+        exceptionSinkId.jvmClassName,
+        isInterface = false,
+        exceptionSinkId.methodName,
+        exceptionSinkId.signature
+      ),
+      RETURN
+    )
+
+    val methodBody = tryCatchBlock(constructionCode, exceptionHandlerCode, Symbol("static initializer exceptions"))
+
+    METHOD(
+      PUBLIC.STATIC,
+      callerMethodName,
+      "()V",
+      CODE(methodBody)
+    )
+  }
+
+  /**
+   * Generates the bytecode for calling the specified instance method.
+   *
+   * @param callerMethodName  The name of the generated method.
+   * @param calledConstructor The constructor method that is called by the generated method.
+   * @param sinkId            The identifier of the sink method.
+   * @param exceptionSinkId   The identifier of the exception sink method.
+   * @return The instructions of the caller method body
+   */
+  def generateConstructorCallerMethod(callerMethodName: String,
+                                      calledConstructor: Method,
+                                      sinkId: FullMethodIdentifier,
+                                      exceptionSinkId: FullMethodIdentifier
+                                     ): METHOD[_] = {
+
+    if (!calledConstructor.isConstructor) {
+      throw new IllegalArgumentException(calledConstructor + " is not a constructor")
+    }
+
+    val methodBody = mutable.ArrayBuilder.make[CodeElement[Nothing]]
+
+    methodBody += NEW(calledConstructor.classFile.thisType)
+    methodBody += DUP
+    methodBody ++= createDefaultParametersAndStoreReferenceTypesToLocalVariables(calledConstructor.parameterTypes)
+
+    val callConstructorAndSinkCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
+    callConstructorAndSinkCode += INVOKESPECIAL(
+      calledConstructor.classFile.thisType,
+      isInterface = false,
+      "<init>",
+      calledConstructor.descriptor
+    )
+
+    callConstructorAndSinkCode += DUP
+
+    // The reference to the constructed object is on the stack (because of DUP)
+    // The reference type parameters need to be passed to sink -> load them.
+    callConstructorAndSinkCode ++= loadReferenceTypeParametersAndCallSinkAndReturn(
+      calledConstructor.parameterTypes,
+      sinkId
+    )
+
+    // Handle Exception: pass everything to exception sink (including exception, but not uninitialized object)
+    val exceptionHandlingCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
+    exceptionHandlingCode += ASTORE_0
+    exceptionHandlingCode += ALOAD_0
+    exceptionHandlingCode ++= loadReferenceTypeParametersAndCallSinkAndReturn(
+      calledConstructor.parameterTypes,
+      exceptionSinkId
+    )
+
+    methodBody ++= tryCatchBlock(
+      callConstructorAndSinkCode.result(),
+      exceptionHandlingCode.result(),
+      Symbol("Constructor")
+    )
+
+    METHOD(
+      PUBLIC.STATIC,
+      callerMethodName,
+      "()V",
+      CODE(methodBody.result())
+    )
+  }
+
+  private def loadReferenceTypeParametersAndCallSinkAndReturn(parameters: FieldTypes,
+                                                              sinkId: FullMethodIdentifier,
+                                                              localVariableIndexOffset: Int = 1
+                                                             ): Array[CodeElement[Nothing]] = {
+    val code = mutable.ArrayBuilder.make[CodeElement[Nothing]]
+    code ++= loadStoredReferenceTypeParametersFromLocalVariables(parameters, localVariableIndexOffset)
+    code += INVOKESTATIC(
+      sinkId.jvmClassName,
+      isInterface = false,
+      sinkId.methodName,
+      sinkId.signature
+    )
+    code += RETURN
+    code.result()
+  }
+
+  private def createDefaultParametersAndStoreReferenceTypesToLocalVariables(parameterList: FieldTypes,
+                                                                            localVariableIndexOffset: Int = 1
+                                                                           ): Seq[CodeElement[Nothing]] = {
+    var localVarIndex = localVariableIndexOffset
+    val methodBody = mutable.ArrayBuilder.make[CodeElement[Nothing]]()
+
+    // Load/construct parameters for method call
+    for (paramType <- parameterList) {
+      paramType match {
+        case _: ReferenceType =>
+          methodBody ++= defaultValueForFieldType(paramType)
+          methodBody += ASTORE(localVarIndex)
+          methodBody += ALOAD(localVarIndex)
+          localVarIndex += 1
+        case _: BaseType =>
+          // Place default value on stack (base types aren't constructed in prior step)
+          methodBody ++= defaultValueForFieldType(paramType)
+      }
+    }
+
+    methodBody.result()
+  }
+
   private def loadStoredReferenceTypeParametersFromLocalVariables(parameterList: FieldTypes,
-                                                                  localVariableOffset: Int = 0
+                                                                  localVariableIndexOffset: Int = 1
                                                                  ): Seq[CodeElement[Nothing]] = {
     parameterList
       .filter(parameter => parameter.isReferenceType)
       .zipWithIndex
-      .map[CodeElement[Nothing]] { case (_: FieldType, localVarIndex: Int) =>
-        instructionToInstructionElement(ALOAD(localVarIndex + localVariableOffset))
+      .map[CodeElement[Nothing]] { case (_: FieldType, localVariableIndex: Int) =>
+        instructionToInstructionElement(ALOAD(localVariableIndex + localVariableIndexOffset))
       }
   }
 }

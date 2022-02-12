@@ -1,9 +1,11 @@
 package de.ckuessner.opal.usagegen.generators
 
+import org.opalj.ba.{CATCH, CodeElement, InstructionElement, TRY, TRYEND}
 import org.opalj.br._
 import org.opalj.br.instructions._
 
 import java.util.regex.Pattern
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 object ByteCodeGenerationHelpers {
@@ -29,15 +31,34 @@ object ByteCodeGenerationHelpers {
     }
   }
 
-  def defaultValueForFieldType(fieldType: FieldType): Array[LabeledInstruction] = {
-    val code = ArrayBuffer.empty[LabeledInstruction]
+  def tryCatchBlock(tryBlock: Iterable[CodeElement[Nothing]],
+                    catchBlock: Iterable[CodeElement[Nothing]],
+                    exceptionSymbol: Symbol,
+                    handlerTablePosition: Int = 0,
+                    handlerType: Option[ObjectType] = None
+                    ): Array[CodeElement[Nothing]] = {
+
+    val bytecode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
+
+    bytecode += TRY(exceptionSymbol)
+    bytecode ++= tryBlock
+    bytecode += TRYEND(exceptionSymbol)
+    bytecode += CATCH(exceptionSymbol, handlerTablePosition, handlerType)
+    bytecode ++= catchBlock
+
+    bytecode.result()
+  }
+
+
+  def defaultValueForFieldType(fieldType: FieldType): Array[InstructionElement] = {
+    val code = ArrayBuffer.empty[InstructionElement]
 
     fieldType match {
       case _: ObjectType =>
         // push null onto stack
         code.append(ACONST_NULL)
       case arrayType: ArrayType => {
-        code ++= (1 to arrayType.dimensions).map(_ => ICONST_0)
+        code ++= (1 to arrayType.dimensions).map(_ => InstructionElement(ICONST_0))
 
         // Nested array
         if (arrayType.dimensions > 1) {
@@ -94,12 +115,16 @@ object ByteCodeGenerationHelpers {
   val fqnIllegalCharsPattern: Pattern = Pattern.compile("[;\\[/<>]")
 
   def generateCallerMethodName(classFile: ClassFile, method: Method, uniqueMethodId: Int): String = {
-    // Note: Does not work for constructor (because of <,> in <init> and <clinit>
     // Restrictions on names described in https://docs.oracle.com/javase/specs/jvms/se17/html/jvms-4.html#jvms-4.2.2
     val sb = new StringBuilder()
-    sb.append(classFile.thisType.fqn.replace('/', '_'))
+    val className = classFile.thisType.simpleName
+    val sanitizedClassName = unqualifiedNameIllegalCharsPattern.matcher(className.replace("?", "??")).replaceAll("?")
+    sb.append(sanitizedClassName)
     sb.append("__")
-    sb.append(unqualifiedNameIllegalCharsPattern.matcher(method.name).replaceAll(""))
+    if (method.isConstructor) {
+      sb.append("_init_")
+    } else
+      sb.append(unqualifiedNameIllegalCharsPattern.matcher(method.name).replaceAll("_"))
     sb.append("__")
     sb.append(uniqueMethodId)
     sb.toString()
