@@ -6,7 +6,12 @@ import java.io.File
 import java.nio.file.{FileAlreadyExistsException, FileSystems, Files}
 
 object JarFileGenerator {
-  def writeClassFilesToJarFile(outputFile: File, classes: List[ClassByteCode], overwriteOutFile: Boolean): Unit = {
+  def writeClassFilesToJarFile(outputFile: File,
+                               classes: List[ClassByteCode],
+                               overwriteOutFile: Boolean,
+                               mainClass: Option[String] = None
+                              ): Unit = {
+
     if (!outputFile.getName.matches(".*\\.(jar|zip)"))
       throw new IllegalArgumentException("outputFile must end with .jar or .zip")
 
@@ -24,6 +29,10 @@ object JarFileGenerator {
 
     val jarManifest = new java.util.jar.Manifest()
     jarManifest.getMainAttributes.put(java.util.jar.Attributes.Name.MANIFEST_VERSION, "1.0")
+
+    if (mainClass.isDefined) {
+      jarManifest.getMainAttributes.put(java.util.jar.Attributes.Name.MANIFEST_VERSION, mainClass.get)
+    }
 
     // Add jar manifest to jar
     val metaInfDir = zipRoot.resolve("META-INF")
