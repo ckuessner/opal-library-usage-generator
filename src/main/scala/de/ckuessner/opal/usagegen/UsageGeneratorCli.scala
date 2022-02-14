@@ -17,6 +17,7 @@ object UsageGeneratorCli extends App {
                     outputJarFile: File,
                     force: Boolean = false,
                     runBytecode: Boolean = false,
+                    runtimeJars: Seq[File] = Seq.empty,
                     verbose: Boolean = false,
                     callerClassName: String = "___DUMMY_CALLER_CLASS___",
                     sinkClassPackage: String = "",
@@ -59,6 +60,18 @@ object UsageGeneratorCli extends App {
         .optional()
         .action((_, c) => c.copy(runBytecode = true)),
 
+      opt[Seq[File]]("runtime-jars")
+        .text("list of jars containing the runtime dependencies of the tested library")
+        .valueName("<jar1>,<jar2>...")
+        .validate(jarFiles => {
+          val nonExistentJarFile = jarFiles.find(jarFile => !jarFile.exists())
+          nonExistentJarFile match {
+            case Some(jarFile) => failure("File " + jarFile.toString + " does not exist")
+            case None => success
+          }
+        })
+        .action((files, config) => config.copy(runtimeJars = files)),
+
       opt[Unit]('v', "verbose")
         .text("Increase logging verbosity")
         .optional()
@@ -97,9 +110,7 @@ object UsageGeneratorCli extends App {
     val sinkClass = SinkGenerator.generateSinkClass(config.sinkClassPackage, config.sinkClassName, callerClasses)
     // Generate entry point class that calls all caller methods (avoiding use of reflection)
     val entryPointClass = EntryPointClassGenerator.generateEntrypointClass(
-      config.entryPointClassPackage,
-      config.entryPointClassName,
-      config.entryPointMethodName,
+      FullMethodIdentifier(config.entryPointClassPackage, config.entryPointClassName, config.entryPointMethodName, "()V"),
       callerClasses
     )
 
@@ -111,22 +122,26 @@ object UsageGeneratorCli extends App {
     JarFileGenerator.writeClassFilesToJarFile(
       config.outputJarFile,
       classes,
-      config.force
+      config.force,
+      Some(compiledEntryPointClass.javaClassName)
     )
 
     if (config.runBytecode) {
       ResourceBundle.clearCache(ClassLoader.getSystemClassLoader)
-      val cl: ClassLoader = new URLClassLoader(Seq(
-        config.projectJarFile.toURI.toURL, // Classloader needs both library jar file
-        config.outputJarFile.toURI.toURL // as well as generated jar file
-      ), null)
-      ResourceBundle.clearCache(cl)
+
+      val classPath = Seq(
+        config.projectJarFile, // Classloader needs both library jar file
+        config.outputJarFile // as well as generated jar file
+      ) ++: config.runtimeJars // Add the runtime jars (i.e., the runtime dependencies specified by --runtime-jars)
+
+      val testedProjectClassLoader: ClassLoader = new URLClassLoader(classPath.map(_.toURI.toURL), null)
+      ResourceBundle.clearCache(testedProjectClassLoader)
 
       val entryPointFqnClassName =
         if (config.entryPointClassPackage.isEmpty) config.entryPointClassName
         else config.entryPointClassPackage + '.' + config.entryPointClassName
 
-      val entryPointClass = cl.loadClass(entryPointFqnClassName)
+      val entryPointClass = testedProjectClassLoader.loadClass(entryPointFqnClassName)
       val entryPointMethod = entryPointClass.getMethod(config.entryPointMethodName)
       try {
         entryPointMethod.invoke(null)

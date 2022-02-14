@@ -26,4 +26,6 @@ object Compilable {
   }
 }
 
-case class ClassByteCode(jvmClassName: String, byteCode: Array[Byte])
+case class ClassByteCode(jvmClassName: String, byteCode: Array[Byte]) {
+  def javaClassName: String = jvmClassName.replace("/", ".")
+}
