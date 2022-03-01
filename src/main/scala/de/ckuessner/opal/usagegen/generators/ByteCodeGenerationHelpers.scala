@@ -1,12 +1,11 @@
 package de.ckuessner.opal.usagegen.generators
 
-import org.opalj.ba.{CATCH, CodeElement, InstructionElement, TRY, TRYEND}
+import org.opalj.ba.{CATCH, CodeElement, TRY, TRYEND}
 import org.opalj.br._
 import org.opalj.br.instructions._
 
 import java.util.regex.Pattern
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 
 object ByteCodeGenerationHelpers {
   def storeInstruction(theType: Type, index: Int): StoreLocalVariableInstruction = {
@@ -36,7 +35,7 @@ object ByteCodeGenerationHelpers {
                     exceptionSymbol: Symbol,
                     handlerTablePosition: Int = 0,
                     handlerType: Option[ObjectType] = None
-                    ): Array[CodeElement[Nothing]] = {
+                   ): Array[CodeElement[Nothing]] = {
 
     val bytecode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
 
@@ -47,38 +46,6 @@ object ByteCodeGenerationHelpers {
     bytecode ++= catchBlock
 
     bytecode.result()
-  }
-
-
-  def defaultValueForFieldType(fieldType: FieldType): Array[InstructionElement] = {
-    val code = ArrayBuffer.empty[InstructionElement]
-
-    fieldType match {
-      case _: ObjectType =>
-        // push null onto stack
-        code.append(ACONST_NULL)
-      case arrayType: ArrayType => {
-        code ++= (1 to arrayType.dimensions).map(_ => InstructionElement(ICONST_0))
-
-        // Nested array
-        if (arrayType.dimensions > 1) {
-          code += MULTIANEWARRAY(arrayType, arrayType.dimensions)
-        } else {
-          // create 1d array with size 0
-          code += (arrayType.elementType match {
-            case referenceType: ReferenceType => ANEWARRAY(referenceType)
-            case baseType: BaseType => NEWARRAY(baseType.atype)
-          })
-        }
-      }
-      case _: IntLikeType => code += ICONST_0
-      case _: DoubleType => code += DCONST_0
-      case _: FloatType => code += FCONST_0
-      case _: LongType => code += LCONST_0
-      case _: BooleanType => code += ICONST_0
-    }
-
-    code.toArray
   }
 
   def generateMethodSignature(method: Method): String = {

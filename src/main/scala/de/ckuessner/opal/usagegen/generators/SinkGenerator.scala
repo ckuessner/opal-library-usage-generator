@@ -5,6 +5,7 @@ import de.ckuessner.opal.usagegen.{CallerClass, FullMethodIdentifier, SinkClass,
 import org.opalj.ba.{CODE, METHOD, PUBLIC}
 import org.opalj.br._
 import org.opalj.br.instructions.RETURN
+import org.opalj.collection.immutable.RefArray
 
 import scala.collection.mutable
 import scala.language.postfixOps
@@ -19,12 +20,12 @@ object SinkGenerator {
    * @param callerClasses The source of the sink methods.
    * @return A SinkClass containing the sink methods from callerClasses.
    */
-  def generateSinkClass(packageName: String, className: String, callerClasses: Iterable[CallerClass]): SinkClass = {
+  def generateSinkClass(packageName: String, className: String, callerClasses: RefArray[CallerClass]): SinkClass = {
     val sinkMethods = callerClasses
       .flatMap(_.callerMethods)
       .flatMap(callerMethod => {
         List(callerMethod.sink, callerMethod.exceptionSink)
-      }).toSet
+      })
 
     SinkClass(packageName, className, sinkMethods)
   }
@@ -36,12 +37,19 @@ object SinkGenerator {
                         ): SinkMethod = {
 
     var returnType = apiMethod.returnType
+    var calleeType: Option[ObjectType] = None // None if static, or constructor
+
     // If the method is a constructor method, pass the instantiated object to the sink
     if (apiMethod.isConstructor) {
       returnType = apiMethod.classFile.thisType
     }
+    // If the method is an instance method, pass the callee instance to the sink
+    else if (apiMethod.isNotStatic) {
+      calleeType = Some(apiMethod.classFile.thisType)
+    }
 
-    val descriptor = generateSinkMethodSignature(returnType, apiMethod.parameterTypes)
+
+    val descriptor = generateSinkMethodSignature(calleeType, returnType, apiMethod.parameterTypes)
     generateSinkMethod(sinkClassPackage, sinkClassName, sinkMethodName, descriptor)
   }
 
@@ -51,7 +59,12 @@ object SinkGenerator {
                                   apiMethod: Method
                                  ): SinkMethod = {
 
-    val descriptor = generateSinkMethodSignature(Type(classOf[Throwable]), apiMethod.parameterTypes)
+    var calleeType: Option[ObjectType] = None // None if static, or constructor
+    if (!apiMethod.isConstructor && apiMethod.isNotStatic) {
+      calleeType = Some(apiMethod.classFile.thisType)
+    }
+
+    val descriptor = generateSinkMethodSignature(calleeType, Type(classOf[Throwable]), apiMethod.parameterTypes)
     generateSinkMethod(sinkClassPackage, sinkClassName, sinkMethodName, descriptor)
   }
 
@@ -75,20 +88,26 @@ object SinkGenerator {
     SinkMethod(sinkMethodId, sinkMethodBody)
   }
 
-  private def generateSinkMethodSignature(apiMethodReturnType: Type, apiMethodParameterTypes: Seq[Type]): String = {
-    // Add parameters to sink method that are not base types (i.e., ignore int, double, ...)
-    val referenceTypeParams = apiMethodParameterTypes.filter(_.isReferenceType)
+  private def generateSinkMethodSignature(instanceType: Option[ObjectType],
+                                          apiMethodReturnType: Type,
+                                          apiMethodParameterTypes: Seq[Type]
+                                         ): String = {
 
-    var sinkMethodParams = Seq.empty[Type]
+    // Parameters are (in order): [instanceType,] [apiMethodReturnType,] referenceTypeParameters...
+    val sinkMethodParameters = mutable.ArrayBuilder.make[Type]()
+
+    if (instanceType.isDefined) sinkMethodParameters += instanceType.get
+
     // Add return value of called method to sink, if not void
     if (!apiMethodReturnType.isVoidType) {
-      sinkMethodParams = apiMethodReturnType +: referenceTypeParams
-    } else {
-      sinkMethodParams = referenceTypeParams
+      sinkMethodParameters += apiMethodReturnType
     }
 
+    // Add parameters to sink method that are not base types (i.e., ignore int, double, ...)
+    sinkMethodParameters ++= apiMethodParameterTypes.filter(_.isReferenceType)
+
     // returnType is void, since sinks only consume values but don't return any
-    generateMethodSignature(VoidType, sinkMethodParams)
+    generateMethodSignature(VoidType, sinkMethodParameters.result())
   }
 
 }

@@ -1,7 +1,8 @@
 package de.ckuessner.opal.usagegen
 
 import de.ckuessner.opal.usagegen.Compilable.{generatedClassCompiler, opalClassCompiler}
-import de.ckuessner.opal.usagegen.generators.{EntryPointClassGenerator, JarFileGenerator, SinkGenerator, UsageGenerator}
+import de.ckuessner.opal.usagegen.analyses.InstanceSearcher
+import de.ckuessner.opal.usagegen.generators._
 import org.opalj.br.analyses.Project
 import org.opalj.log.{ConsoleOPALLogger, GlobalLogContext, OPALLogger}
 import scopt.OParser
@@ -19,7 +20,8 @@ object UsageGeneratorCli extends App {
                     runBytecode: Boolean = false,
                     runtimeJars: Seq[File] = Seq.empty,
                     verbose: Boolean = false,
-                    callerClassName: String = "___DUMMY_CALLER_CLASS___",
+                    callerClassName: String = "___METHOD_CALLER___",
+                    instanceProviderClassName: String = "___INSTANCE_PROVIDER___",
                     sinkClassPackage: String = "",
                     sinkClassName: String = "___SINK___",
                     entryPointClassPackage: String = "",
@@ -102,11 +104,22 @@ object UsageGeneratorCli extends App {
       else org.opalj.log.Warn
 
     OPALLogger.updateLogger(GlobalLogContext, new ConsoleOPALLogger(true, opalLogLevel))
-    val project = Project(config.projectJarFile, new ConsoleOPALLogger(true, opalLogLevel))
+    val project = Project(
+      projectFiles = Array(config.projectJarFile),
+      libraryFiles = config.runtimeJars.toArray
+      //, new ConsoleOPALLogger(true, opalLogLevel)
+    )
 
-    // Generate caller classes that call the library functions
-    val callerClasses = UsageGenerator.generateDummyUsage(project, config.callerClassName, config.sinkClassPackage, config.sinkClassName)
-    // Generate sink class containing all sink methods from caller classes
+    // Extract sources of instances for types consumed by library methods (either as parameter, or as instance for instance methods)
+    val instanceSourcesMap = InstanceSearcher(project).typeToInstanceSourcesMap
+    // Generate classes with methods providing instances for used types
+    val instanceProviderGenerator = InstanceProviderGenerator(DefaultValueLoadingGenerator.defaultValuesForFieldTypes, config.instanceProviderClassName)
+    val instanceProviderClasses = instanceProviderGenerator.generateInstanceProviderClasses(instanceSourcesMap.flatMap(_._2))
+
+    // Generate caller classes that actually call the library functions
+    val usageGenerator = new UsageGenerator(project, new MethodCallGenerator(instanceProviderClasses.typeToProviderMethodMap), config.callerClassName, config.sinkClassPackage, config.sinkClassName)
+    val callerClasses = usageGenerator.generateDummyUsage
+    // Generate sink class containing all sink methods used by caller methods
     val sinkClass = SinkGenerator.generateSinkClass(config.sinkClassPackage, config.sinkClassName, callerClasses)
     // Generate entry point class that calls all caller methods (avoiding use of reflection)
     val entryPointClass = EntryPointClassGenerator.generateEntrypointClass(
@@ -114,10 +127,16 @@ object UsageGeneratorCli extends App {
       callerClasses
     )
 
+    // Class that is called when generated jar is run using MANIFEST main. Calls all caller classes.
     val compiledEntryPointClass = Compiler.compile(entryPointClass)
-    val compiledSinkClass = Compiler.compile(sinkClass)(generatedClassCompiler)
-    val compiledCallerClasses = callerClasses.map(Compiler.compile(_)(generatedClassCompiler)).toList
-    val classes = compiledEntryPointClass :: compiledSinkClass :: compiledCallerClasses
+    // Class that contains all sink methods.
+    val compiledSinkClass = Compiler.compile(sinkClass)
+    // Classes with methods that each call one method of the tested library.
+    val compiledCallerClasses = callerClasses.map(Compiler.compile(_)).toList
+    // Classes that contain methods that return an instance of a specific type.
+    val compiledInstanceProviderClasses = instanceProviderClasses.providerClasses.map(Compiler.compile(_))
+
+    val classes = compiledEntryPointClass :: compiledSinkClass :: (compiledCallerClasses ++ compiledInstanceProviderClasses)
 
     JarFileGenerator.writeClassFilesToJarFile(
       config.outputJarFile,
