@@ -10,7 +10,7 @@ sealed trait GeneratedClass {
 
   def className: String
 
-  def methods: Set[GeneratedMethod]
+  def methods: RefArray[GeneratedMethod]
 
   def jvmClassName: String = packageAndClassToJvmClassName(packageName, className)
 
@@ -21,10 +21,14 @@ sealed trait GeneratedClass {
 
 }
 
-case class SinkClass(packageName: String, className: String, sinkMethods: Set[SinkMethod]) extends GeneratedClass {
-  def methods: Set[GeneratedMethod] = sinkMethods.toSet
+case class SinkClass(packageName: String, className: String, sinkMethods: RefArray[SinkMethod]) extends GeneratedClass {
+  def methods: RefArray[GeneratedMethod] = sinkMethods
 }
 
-case class CallerClass(packageName: String, className: String, callerMethods: Set[CallerMethod]) extends GeneratedClass {
-  def methods: Set[GeneratedMethod] = callerMethods.toSet
+case class CallerClass(packageName: String, className: String, callerMethods: RefArray[CallerMethod]) extends GeneratedClass {
+  def methods: RefArray[GeneratedMethod] = callerMethods
+}
+
+case class InstanceProviderClass(packageName: String, className: String, instanceProviderMethods: RefArray[InstanceProviderMethod]) extends GeneratedClass {
+  def methods: RefArray[GeneratedMethod] = instanceProviderMethods
 }
