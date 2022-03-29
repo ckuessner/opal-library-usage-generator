@@ -16,6 +16,8 @@ lazy val root: Project = project
     libraryDependencies += "org.scalactic" %% "scalactic" % "3.2.11",
     libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.11" % "test",
 
+    libraryDependencies += "io.get-coursier" %% "coursier" % "2.1.0-M5-18-gfebf9838c",
+
     assembly / assemblyJarName := "usagegen.jar",
     assembly / assemblyMergeStrategy := discardModuleInfoMergeStrategy,
 
