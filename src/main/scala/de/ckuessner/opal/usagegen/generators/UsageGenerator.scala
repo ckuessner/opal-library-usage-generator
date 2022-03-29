@@ -1,8 +1,8 @@
 package de.ckuessner.opal.usagegen.generators
 
 import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.generateCallerMethodName
+import de.ckuessner.opal.usagegen.generators.methods.MethodCallGenerator
 import de.ckuessner.opal.usagegen.{CallerClass, CallerMethod, FullMethodIdentifier, SinkMethod}
-import org.opalj.ba.METHOD
 import org.opalj.br.analyses.Project
 import org.opalj.br.{ClassFile, Method}
 import org.opalj.collection.immutable.RefArray
@@ -22,14 +22,12 @@ class UsageGenerator(private val project: Project[_],
       .groupBy(_.thisType.packageName)
       .map { case (packageName, classFilesInPackage) =>
         val callerMethods = classFilesInPackage
-          .filterNot(_.isAbstract) // TODO: Implementation for abstract classes
           .flatMap { calleeClassFile: ClassFile =>
             // Generate usage for methods (including constructor methods)
             calleeClassFile.methods
-              .filterNot(_.isAbstract) // TODO: Implementation for abstract methods
-              .filterNot(_.isPrivate) // TODO: Implementation for private methods
-              .filterNot(_.isStaticInitializer) // Static initializers (i.e., <clinit>) is invoked by jvm on first load of class
-              .zipWithIndex // index is for uniqueness of caller method name
+              .filterNot(_.isPrivate) // TODO: Implementation for private methods (including constructors)
+              .filterNot(_.isStaticInitializer) // Static initializers (i.e., <clinit>) is invoked by jvm on first load of class and not directly callable
+              .zipWithIndex // index is used to ensure uniqueness of caller method name
               .map[CallerMethod]({ case (method: Method, uniqueNumber: Int) =>
                 // Name of the method that calls the library method
                 val callerMethodName = generateCallerMethodName(calleeClassFile, method, uniqueNumber)
@@ -60,38 +58,7 @@ class UsageGenerator(private val project: Project[_],
                                    sink: SinkMethod,
                                    exceptionSink: SinkMethod): CallerMethod = {
 
-    var callerMethod: METHOD[_] = null
-    if (method.isConstructor) {
-      callerMethod = methodCallGenerator.generateConstructorCallerMethod(
-        callerMethodName = callerMethodId.methodName,
-        calledConstructor = method,
-        sink.methodId,
-        exceptionSink.methodId
-      )
-    } else if (method.isStatic) {
-      callerMethod = methodCallGenerator.generateStaticMethodCallerMethod(
-        callerMethodName = callerMethodId.methodName,
-        calledMethod = method,
-        sink.methodId,
-        exceptionSink.methodId
-      )
-    } else if (method.isNotStatic) {
-      callerMethod = methodCallGenerator.generateInstanceMethodCallerMethod(
-        callerMethodName = callerMethodId.methodName,
-        instanceMethod = method,
-        sinkId = sink.methodId,
-        exceptionSinkId = exceptionSink.methodId
-      )
-    } else {
-      ???
-    }
-
-    CallerMethod(
-      callerMethodId,
-      callerMethod,
-      sink,
-      exceptionSink
-    )
+    methodCallGenerator.generateCallerMethod(method, callerMethodId, sink, exceptionSink)
   }
 }
 
