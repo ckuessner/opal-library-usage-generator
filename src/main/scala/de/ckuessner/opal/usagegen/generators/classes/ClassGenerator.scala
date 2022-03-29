@@ -1,4 +1,4 @@
-package de.ckuessner.opal.usagegen.generators
+package de.ckuessner.opal.usagegen.generators.classes
 
 import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.packageAndClassToJvmClassName
 import org.opalj.ba.{CLASS, METHODS, PUBLIC}

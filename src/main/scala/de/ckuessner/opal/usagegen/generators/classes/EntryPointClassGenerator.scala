@@ -1,4 +1,4 @@
-package de.ckuessner.opal.usagegen.generators
+package de.ckuessner.opal.usagegen.generators.classes
 
 import de.ckuessner.opal.usagegen.{CallerClass, FullMethodIdentifier}
 import org.opalj.ba.{CLASS, CODE, CodeElement, METHOD, METHODS, PUBLIC}

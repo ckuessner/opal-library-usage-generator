@@ -1,5 +1,6 @@
 package de.ckuessner.opal.usagegen.analyses
 
+import de.ckuessner.opal.usagegen.GeneratedClass
 import org.opalj.br.analyses.Project
 import org.opalj.br.{ClassFile, ObjectType}
 import org.opalj.collection.immutable.RefArray
@@ -7,7 +8,7 @@ import org.opalj.collection.immutable.RefArray
 import java.io.File
 import java.net.URL
 
-class InstanceSearcher(private val project: Project[_]) {
+class InstanceSearcher(private val project: Project[_], private val generatedClasses: RefArray[GeneratedClass]) {
   def searchStaticNonPrivateFieldsOfType(theType: ObjectType): Iterable[StaticFieldInstanceSource] = {
     project.allFields.filter(field =>
       field.isStatic && !field.isPrivate && field.fieldType == theType
@@ -86,6 +87,7 @@ class InstanceSearcher(private val project: Project[_]) {
     instanceSourcesForType ++= searchNonPrivateConstructorsForType(objectType)
     instanceSourcesForType ++= searchStaticNonPrivateFieldsOfType(objectType)
     instanceSourcesForType ++= searchStaticMethodsReturningType(objectType)
+    instanceSourcesForType ++= generatedClasses.flatMap(_.instanceSources)
     instanceSourcesForType.result()
   }
 
@@ -97,16 +99,16 @@ class InstanceSearcher(private val project: Project[_]) {
 }
 
 object InstanceSearcher {
-  def apply(project: Project[URL]): InstanceSearcher = {
-    new InstanceSearcher(project)
+  def apply(project: Project[URL], generatedClasses: RefArray[GeneratedClass]): InstanceSearcher = {
+    new InstanceSearcher(project, generatedClasses)
   }
 
-  def apply(libraryJar: File, runTimeJars: Seq[File]): InstanceSearcher = {
+  def apply(libraryJar: File, runTimeJars: Seq[File], generatedClasses: RefArray[GeneratedClass]): InstanceSearcher = {
     InstanceSearcher(
       Project(
         Array(libraryJar),
         runTimeJars.toArray
-      )
+      ), generatedClasses
     )
   }
 }
