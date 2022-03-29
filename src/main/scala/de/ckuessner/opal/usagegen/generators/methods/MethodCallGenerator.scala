@@ -195,14 +195,16 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
     } else {
       methodBody += NEW(calledConstructor.classFile.thisType)
     }
-    methodBody += DUP
+    methodBody += ASTORE_0 // Store object ref to local var 0
+    methodBody += ALOAD_0 // Load it again for constructor call
+    // Load constructor parameters, storing references to local vars
     methodBody ++= createParametersAndStoreObjectParametersToLocalVariables(
       calledConstructor,
       localVariableIndexStart = 1
     )
 
     val callConstructorAndSinkCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
-    callConstructorAndSinkCode += INVOKESPECIAL(
+    callConstructorAndSinkCode += INVOKESPECIAL( // Call constructor on real class or delegate stub class
       if (calledConstructor.classFile.isAbstract) {
         if (!stubSubClass.get.constructorMethods.exists(_.methodId.descriptor.equals(calledConstructor.descriptor.toJVMDescriptor)))
           throw new RuntimeException(s"Concrete stub subclass $stubSubClass doesn't implement <init>${calledConstructor.descriptor}")
@@ -216,10 +218,11 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
       calledConstructor.descriptor.toJVMDescriptor
     )
 
-    callConstructorAndSinkCode += DUP
+    callConstructorAndSinkCode += ALOAD_0 // Load reference to constructed object
 
-    // The reference to the constructed object is on the stack (because of DUP)
+    // The reference to the constructed object is on the stack (because of ALOAD_0)
     // The reference type parameters need to be passed to sink -> load them.
+    // calling sink and RETURN is already handled by method below
     callConstructorAndSinkCode ++= loadObjectParametersAndCallSinkAndReturn(
       calledConstructor.parameterTypes,
       sinkId,
@@ -228,7 +231,7 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
 
     // Handle Exception: pass everything to exception sink (including exception, but not uninitialized object)
     val exceptionHandlingCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
-    exceptionHandlingCode += ASTORE_0
+    exceptionHandlingCode += ASTORE_0 // Overrides reference to created object (that is unusable, because of exception)
     exceptionHandlingCode += ALOAD_0
     exceptionHandlingCode ++= loadObjectParametersAndCallSinkAndReturn(
       calledConstructor.parameterTypes,
@@ -271,7 +274,7 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
 
     val methodBody = mutable.ArrayBuilder.make[CodeElement[Nothing]]
 
-    createInstanceAndStoreInLocalVar(instanceMethod, 0)
+    methodBody ++= createInstanceAndStoreInLocalVar(instanceMethod, 0)
 
     // Get reference to callee object
     methodBody += ALOAD_0
