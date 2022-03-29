@@ -1,7 +1,7 @@
 package de.ckuessner.opal.usagegen.generators.parameters
 
 import de.ckuessner.opal.usagegen._
-import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.{packageAndClassToJvmClassName, unqualifiedNameIllegalCharsPattern}
+import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.unqualifiedNameIllegalCharsPattern
 import de.ckuessner.opal.usagegen.generators.parameters.DefaultValueGenerator.defaultValueForFieldType
 import de.ckuessner.opal.usagegen.generators.parameters.ParameterGenerator.selectFirstNonNullParameterFromInstanceProviderMethods
 import org.opalj.ba.{CODE, CodeElement, METHOD, PUBLIC}
@@ -10,8 +10,21 @@ import org.opalj.br.{FieldType, Method, MethodDescriptor, ObjectType}
 import org.opalj.collection.immutable.RefArray
 
 class InstanceProviderBasedParameterGenerator(val parameterGeneratorPackageName: String,
-                                              val parameterGeneratorClassName: String,
-                                              providers: Map[ObjectType, Seq[InstanceProviderMethod]]) extends ParameterGenerator {
+                                              val parameterGeneratorClassBaseName: String,
+                                              providers: Map[ObjectType, Seq[InstanceProviderMethod]]
+                                             ) extends ParameterGenerator {
+
+  // TODO: This number could be tweaked
+  // This is set so low as to avoid contant pool overflows
+  private val providersPerClass: Int = 10
+
+  private val typeToProviderMethodMap: Map[ObjectType, AuxiliaryMethod] = {
+    providers.zipWithIndex.map { case ((objectType, providerMethods), generatedMethodCounter) =>
+      val classNumber = generatedMethodCounter / providersPerClass
+      val className = s"$parameterGeneratorClassBaseName$$c$classNumber"
+      objectType -> generateParameterSelectionMethod(objectType, providerMethods, parameterGeneratorPackageName, className)
+    }
+  }
 
   private val preferParameterlessSourcesOrdering: Ordering[InstanceProviderMethod] =
     (x: InstanceProviderMethod, y: InstanceProviderMethod) =>
@@ -19,29 +32,40 @@ class InstanceProviderBasedParameterGenerator(val parameterGeneratorPackageName:
       else if (x.instanceSource.isInstanceSourceParameterless && y.instanceSource.isInstanceSourceParameterless) -1
       else 1
 
-  override val generatedClasses: Seq[GeneratedClass] = Seq(AuxiliaryClass(
-    parameterGeneratorPackageName, parameterGeneratorClassName,
-    RefArray._UNSAFE_from(
-      providers.map { case (objectType: ObjectType, instanceProviderMethods) =>
-        generateParameterSelectionMethod(objectType, instanceProviderMethods)
-      }.toArray
-    )))
+
+  override val generatedClasses: Iterable[GeneratedClass] =
+    typeToProviderMethodMap
+      .values
+      .groupBy(_.methodId.simpleClassName)
+      .map { case (className, methods) =>
+        AuxiliaryClass(parameterGeneratorPackageName, className,
+          RefArray._UNSAFE_from(methods.toArray)
+        )
+      }
 
   private def methodNameForType(objectType: ObjectType): String =
     unqualifiedNameIllegalCharsPattern.matcher(objectType.fqn).replaceAll("_")
 
-  private def generateParameterSelectionMethod(objectType: ObjectType, providerMethods: Seq[InstanceProviderMethod]): AuxiliaryMethod = {
+  private def generateParameterSelectionMethod(objectType: ObjectType,
+                                               providerMethods: Seq[InstanceProviderMethod],
+                                               packageName: String,
+                                               className: String
+                                              ): AuxiliaryMethod = {
+
     val methodName = methodNameForType(objectType)
     val signature = MethodDescriptor.withNoArgs(objectType).toJVMDescriptor
     AuxiliaryMethod(
-      FullMethodIdentifier(parameterGeneratorPackageName, parameterGeneratorClassName, methodName, signature),
+      FullMethodIdentifier(packageName, className, methodName, signature),
       METHOD(
         PUBLIC.STATIC,
         methodName,
         signature,
         CODE(
           selectFirstNonNullParameterFromInstanceProviderMethods(
-            providerMethods.sorted(preferParameterlessSourcesOrdering),
+            providerMethods.sortWith(
+              (x: InstanceProviderMethod, y: InstanceProviderMethod) =>
+                x.instanceSource.isInstanceSourceParameterless && !y.instanceSource.isInstanceSourceParameterless
+            ),
             defaultValueForFieldType(objectType)
           )
         )
@@ -55,15 +79,19 @@ class InstanceProviderBasedParameterGenerator(val parameterGeneratorPackageName:
 
   override def generateParameter(parameterType: FieldType): Array[CodeElement[Nothing]] = {
     if (parameterType.isObjectType) {
-      Array(
-        INVOKESTATIC(
-          packageAndClassToJvmClassName(parameterGeneratorPackageName, parameterGeneratorClassName),
-          isInterface = false,
-          methodNameForType(parameterType.asObjectType),
-          MethodDescriptor.withNoArgs(parameterType.asObjectType).toJVMDescriptor
-        ))
-    } else {
-      defaultValueForFieldType(parameterType)
+      typeToProviderMethodMap.get(parameterType.asObjectType) match {
+        case Some(providerMethod) =>
+          return Array(
+            INVOKESTATIC(
+              providerMethod.methodId.jvmClassName,
+              isInterface = false,
+              methodNameForType(parameterType.asObjectType),
+              MethodDescriptor.withNoArgs(parameterType.asObjectType).toJVMDescriptor
+            ))
+        case None => System.err.println("InstanceProviderBasedParameterGenerator: " + parameterType + " is requested but not known")
+      }
     }
+
+    defaultValueForFieldType(parameterType)
   }
 }

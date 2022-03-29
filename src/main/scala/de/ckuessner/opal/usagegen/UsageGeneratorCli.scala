@@ -117,7 +117,7 @@ object UsageGeneratorCli extends App {
     val instanceProviderClasses = instanceProviderGenerator.generateInstanceProviderClasses(instanceSourcesMap.flatMap(_._2))
 
     val parameterGenerator = new InstanceProviderBasedParameterGenerator(
-      "",
+      "___parameter_generators___",
       "___INSTANCE_PROVIDER_PARAMETER_GENERATOR___",
       instanceProviderClasses.typeToProviderMethodMap
     )
@@ -173,8 +173,8 @@ object UsageGeneratorCli extends App {
   private def compileAndCreateJar(config: Config,
                                   entryPointClass: CLASS[_],
                                   sinkClass: SinkClass,
-                                  callerClasses: Seq[CallerClass],
-                                  parameterGeneratorClasses: Seq[GeneratedClass],
+                                  callerClasses: Iterable[CallerClass],
+                                  parameterGeneratorClasses: Iterable[GeneratedClass],
                                   instanceProviderClasses: InstanceProviderClasses,
                                   concreteSubclasses: Iterable[ConcreteSubclass]
                                  ): Unit = {

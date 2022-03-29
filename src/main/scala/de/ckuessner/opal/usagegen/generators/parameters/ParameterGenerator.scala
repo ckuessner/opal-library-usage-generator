@@ -16,7 +16,7 @@ trait ParameterGenerator {
    *
    * @return The generated classes
    */
-  def generatedClasses: Seq[GeneratedClass] = Seq.empty
+  def generatedClasses: Iterable[GeneratedClass] = Seq.empty
 
   /**
    * Generate code that creates all parameters for a method call.
