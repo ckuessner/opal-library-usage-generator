@@ -19,6 +19,13 @@ lazy val root: Project = project
     libraryDependencies += "io.get-coursier" %% "coursier" % "2.1.0-M5-18-gfebf9838c",
 
     assembly / assemblyJarName := "usagegen.jar",
+    assembly / assemblyExcludedJars := {
+      val cp = (assembly / fullClasspath).value
+      cp.filter { f =>
+        Seq("coursier", "scalatest", "jniutils", "windows-jni-utils", "windows-ansi", "jansi", "plexus")
+          .exists { excluded => f.data.getName.contains(excluded) }
+      }
+    },
     assembly / assemblyMergeStrategy := discardModuleInfoMergeStrategy,
 
     Test / compile := ((Test / compile) dependsOn (instancesearchertest / copyJarToTestResources)).value
