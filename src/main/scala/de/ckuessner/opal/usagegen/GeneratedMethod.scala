@@ -68,8 +68,7 @@ object FullMethodIdentifier {
     }
 
     if (unqualifiedNameIllegalCharsPattern.matcher(methodName).matches()
-      || "<init>".equals(methodName)
-      || "<clinit>".equals(methodName)
+      && !("<init>".equals(methodName) || "<clinit>".equals(methodName))
     ) {
       throw new IllegalArgumentException(methodName + " is an invalid method name")
     }
