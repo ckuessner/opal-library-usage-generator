@@ -52,7 +52,7 @@ object DefaultValueGenerator {
           declaringClass = objectType.fqn,
           isInterface = false,
           methodName = "valueOf",
-          methodDescriptor = s"(${unboxedType.toJVMTypeName})L${objectType.toJVMTypeName};"
+          methodDescriptor = s"(${unboxedType.toJVMTypeName})${objectType.toJVMTypeName}"
         )
       )
     }

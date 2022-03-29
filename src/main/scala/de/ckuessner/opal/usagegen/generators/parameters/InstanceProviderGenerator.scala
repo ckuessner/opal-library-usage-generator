@@ -1,7 +1,8 @@
 package de.ckuessner.opal.usagegen.generators.parameters
 
 import de.ckuessner.opal.usagegen.analyses._
-import InstanceProviderGenerator.instanceProviderMethodName
+import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.unqualifiedNameIllegalCharsPattern
+import de.ckuessner.opal.usagegen.generators.parameters.InstanceProviderGenerator.instanceProviderMethodName
 import de.ckuessner.opal.usagegen.{FullMethodIdentifier, InstanceProviderClass, InstanceProviderMethod}
 import org.opalj.ba.{CATCH, CODE, CodeElement, METHOD, PUBLIC, TRY, TRYEND}
 import org.opalj.br.instructions.{ACONST_NULL, ARETURN, DUP, GETSTATIC, INVOKESPECIAL, INVOKESTATIC, NEW}
@@ -11,28 +12,33 @@ import org.opalj.collection.immutable.RefArray
 import scala.collection.mutable
 
 class InstanceProviderGenerator(private val parameterGenerator: ParameterGenerator,
-                                private val providerClassName: String
+                                private val providerClassBaseName: String
                                ) {
 
-  def generateInstanceProviderClasses(instanceSources: Iterable[InstanceSource]): InstanceProviderClasses = {
-    val generatedClasses = instanceSources.groupBy(_.sourcePackage) // One class per package
-      .map { case (packageName, instanceSources) =>
-        val methods = instanceSources
-          .zipWithIndex // To ensure that the provider method name is unique, a unique index is attached
-          .map { case (instanceSource, index) =>
-            val providerMethodName = instanceProviderMethodName(instanceSource, index)
-            val providerMethodDescriptor = MethodDescriptor.withNoArgs(instanceSource.instanceType).toJVMDescriptor
-            InstanceProviderMethod(
-              FullMethodIdentifier(packageName, providerClassName, providerMethodName, providerMethodDescriptor),
-              generateInstanceProviderMethod(providerMethodName, instanceSource),
-              instanceSource
-            )
-          }
+  private val methodsPerClass = 500
 
-        InstanceProviderClass(
-          packageName, providerClassName, RefArray._UNSAFE_from(methods.toArray)
-        )
-      }
+  def generateInstanceProviderClasses(instanceSources: Iterable[InstanceSource]): InstanceProviderClasses = {
+    val generatedClasses = instanceSources.groupBy(_.sourcePackage).flatMap { case (packageName, instanceSources) =>
+      val methods = instanceSources
+        .zipWithIndex // To ensure that the provider method name is unique, a unique index is attached
+        .map { case (instanceSource, counter) =>
+          val providerClassName = s"$providerClassBaseName$$c${counter / methodsPerClass}"
+          val providerMethodName = instanceProviderMethodName(instanceSource, counter)
+          val providerMethodDescriptor = MethodDescriptor.withNoArgs(instanceSource.instanceType).toJVMDescriptor
+          InstanceProviderMethod(
+            FullMethodIdentifier(packageName, providerClassName, providerMethodName, providerMethodDescriptor),
+            generateInstanceProviderMethod(providerMethodName, instanceSource),
+            instanceSource
+          )
+        }
+
+      methods.groupBy(_.methodId.simpleClassName)
+        .map { case (providerClassName, methods) =>
+          InstanceProviderClass(
+            packageName, providerClassName, RefArray._UNSAFE_from(methods.toArray)
+          )
+        }
+    }
 
     InstanceProviderClasses(RefArray._UNSAFE_from(generatedClasses.toArray))
   }
@@ -123,7 +129,11 @@ object InstanceProviderGenerator {
       case StubSubclassInstanceSource(_, _, _) => "using_stub_subclass"
     }
 
-    s"${verb}__${instanceSource.instanceType.simpleName}__$uniqueIndex"
+    val sanitizedClassName = unqualifiedNameIllegalCharsPattern.matcher(
+      instanceSource.instanceType.simpleName.replace("?", "??")
+    ).replaceAll("?")
+
+    s"${verb}__${sanitizedClassName}__$uniqueIndex"
   }
 }
 

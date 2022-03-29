@@ -65,7 +65,8 @@ class InstanceProviderBasedParameterGenerator(val parameterGeneratorPackageName:
             providerMethods.sortWith(
               (x: InstanceProviderMethod, y: InstanceProviderMethod) =>
                 x.instanceSource.isInstanceSourceParameterless && !y.instanceSource.isInstanceSourceParameterless
-            ),
+            ).take(100), // TODO: This is probably not the best strategy, but avoids huge methods
+            // TODO: It would is also more performant to take 100 before sorting
             defaultValueForFieldType(objectType)
           )
         )

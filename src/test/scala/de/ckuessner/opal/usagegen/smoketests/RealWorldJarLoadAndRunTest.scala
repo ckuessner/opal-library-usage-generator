@@ -23,6 +23,9 @@ class RealWorldJarLoadAndRunTest extends AnyFlatSpec with BeforeAndAfterAll {
       Fetch().addDependencies(libraryName).run() match {
         case library :: dependencies => libraryName -> (library, dependencies)
       }).toMap
+
+    Console.out.flush()
+    Console.err.flush()
   }
 
   behavior of "UsageGeneratorCli"
@@ -39,6 +42,8 @@ class RealWorldJarLoadAndRunTest extends AnyFlatSpec with BeforeAndAfterAll {
 
         println("Running " + args.mkString(" "))
         UsageGeneratorCli.main(args)
+        Console.out.flush()
+        Console.err.flush()
       }
     }
   }

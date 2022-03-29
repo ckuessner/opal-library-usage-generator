@@ -11,7 +11,7 @@ import scala.language.postfixOps
 
 class UsageGenerator(private val project: Project[_],
                      private val methodCallGenerator: MethodCallGenerator,
-                     val callerClassName: String,
+                     val callerClassBaseName: String,
                      val sinkClassPackage: String,
                      val sinkClassName: String
                     ) {
@@ -21,16 +21,18 @@ class UsageGenerator(private val project: Project[_],
     val callerClasses = project.allProjectClassFiles
       .groupBy(_.thisType.packageName)
       .map { case (packageName, classFilesInPackage) =>
-        val callerMethods = classFilesInPackage
-          .flatMap { calleeClassFile: ClassFile =>
+        classFilesInPackage.iterator
+          .map { calleeClassFile: ClassFile =>
+            val callerClassName = s"$callerClassBaseName$$${calleeClassFile.thisType.simpleName}"
+
             // Generate usage for methods (including constructor methods)
-            calleeClassFile.methods
+            val callerMethods = calleeClassFile.methods
               .filterNot(_.isPrivate) // TODO: Implementation for private methods (including constructors)
               .filterNot(_.isStaticInitializer) // Static initializers (i.e., <clinit>) is invoked by jvm on first load of class and not directly callable
               .zipWithIndex // index is used to ensure uniqueness of caller method name
               .map[CallerMethod]({ case (method: Method, uniqueNumber: Int) =>
                 // Name of the method that calls the library method
-                val callerMethodName = generateCallerMethodName(calleeClassFile, method, uniqueNumber)
+                val callerMethodName = generateCallerMethodName(method.classFile, method, uniqueNumber)
                 // Method identifier for the caller method
                 val callerMethodId = FullMethodIdentifier(packageName, callerClassName, callerMethodName, "()V")
 
@@ -41,16 +43,16 @@ class UsageGenerator(private val project: Project[_],
                 // Generate caller method for `method`
                 generateCallerMethod(method, callerMethodId, sinkMethod, exceptionSinkMethod)
               })
-          }
 
-        CallerClass(
-          packageName,
-          callerClassName,
-          RefArray._UNSAFE_from(callerMethods.toArray)
-        )
+            CallerClass(
+              packageName,
+              callerClassName,
+              RefArray._UNSAFE_from(callerMethods.toArray)
+            )
+          }
       }
 
-    RefArray._UNSAFE_from(callerClasses.toArray)
+    RefArray._UNSAFE_from(callerClasses.flatten.toArray)
   }
 
   private def generateCallerMethod(method: Method,
