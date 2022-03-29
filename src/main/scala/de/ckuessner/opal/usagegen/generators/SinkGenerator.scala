@@ -30,6 +30,7 @@ object SinkGenerator {
     SinkClass(packageName, className, sinkMethods)
   }
 
+  // TODO: This could be refactored into a SinkClass container with an addSinkMethod method
   def generateSinkMethod(sinkClassPackage: String,
                          sinkClassName: String,
                          sinkMethodName: String,

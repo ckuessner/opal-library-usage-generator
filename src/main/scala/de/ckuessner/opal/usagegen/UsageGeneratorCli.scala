@@ -3,12 +3,18 @@ package de.ckuessner.opal.usagegen
 import de.ckuessner.opal.usagegen.Compilable.{generatedClassCompiler, opalClassCompiler}
 import de.ckuessner.opal.usagegen.analyses.InstanceSearcher
 import de.ckuessner.opal.usagegen.generators._
+import de.ckuessner.opal.usagegen.generators.classes.{ConcreteSubclassGenerator, EntryPointClassGenerator}
+import de.ckuessner.opal.usagegen.generators.methods.MethodCallGenerator
+import de.ckuessner.opal.usagegen.generators.parameters.{DefaultValueParameterGenerator, InstanceProviderBasedParameterGenerator, InstanceProviderClasses, InstanceProviderGenerator}
+import org.opalj.ba.CLASS
 import org.opalj.br.analyses.Project
+import org.opalj.collection.immutable.RefArray
 import org.opalj.log.{ConsoleOPALLogger, GlobalLogContext, OPALLogger}
 import scopt.OParser
 
 import java.io.File
 import java.lang.reflect.InvocationTargetException
+import java.net.URL
 import java.util.ResourceBundle
 import scala.reflect.internal.util.ScalaClassLoader.URLClassLoader
 
@@ -98,26 +104,31 @@ object UsageGeneratorCli extends App {
   }
 
   def run(config: Config): Unit = {
-    // Silence Info level logs from opal
-    val opalLogLevel =
-      if (config.verbose) org.opalj.log.Info
-      else org.opalj.log.Warn
+    val project: Project[URL] = setupProject(config)
 
-    OPALLogger.updateLogger(GlobalLogContext, new ConsoleOPALLogger(true, opalLogLevel))
-    val project = Project(
-      projectFiles = Array(config.projectJarFile),
-      libraryFiles = config.runtimeJars.toArray
-      //, new ConsoleOPALLogger(true, opalLogLevel)
-    )
+    val concreteSubclasses = project.allClassFiles.filter(_.isAbstract).flatMap { abstractClassFile =>
+      ConcreteSubclassGenerator.generateConcreteSubclass(abstractClassFile)
+    }
 
     // Extract sources of instances for types consumed by library methods (either as parameter, or as instance for instance methods)
-    val instanceSourcesMap = InstanceSearcher(project).typeToInstanceSourcesMap
+    val instanceSourcesMap = InstanceSearcher(project, RefArray._UNSAFE_from[GeneratedClass](concreteSubclasses.toArray)).typeToInstanceSourcesMap
     // Generate classes with methods providing instances for used types
-    val instanceProviderGenerator = InstanceProviderGenerator(DefaultValueLoadingGenerator.defaultValuesForFieldTypes, config.instanceProviderClassName)
+    val instanceProviderGenerator = InstanceProviderGenerator(DefaultValueParameterGenerator, config.instanceProviderClassName)
     val instanceProviderClasses = instanceProviderGenerator.generateInstanceProviderClasses(instanceSourcesMap.flatMap(_._2))
 
+    val parameterGenerator = new InstanceProviderBasedParameterGenerator(
+      "",
+      "___INSTANCE_PROVIDER_PARAMETER_GENERATOR___",
+      instanceProviderClasses.typeToProviderMethodMap
+    )
+
     // Generate caller classes that actually call the library functions
-    val usageGenerator = new UsageGenerator(project, new MethodCallGenerator(instanceProviderClasses.typeToProviderMethodMap), config.callerClassName, config.sinkClassPackage, config.sinkClassName)
+    val concreteSubclassMap = concreteSubclasses.map(subclass => subclass.abstractSuperClass.thisType -> subclass).toMap
+    val usageGenerator = new UsageGenerator(
+      project,
+      new MethodCallGenerator(parameterGenerator, concreteSubclassMap),
+      config.callerClassName, config.sinkClassPackage, config.sinkClassName
+    )
     val callerClasses = usageGenerator.generateDummyUsage
     // Generate sink class containing all sink methods used by caller methods
     val sinkClass = SinkGenerator.generateSinkClass(config.sinkClassPackage, config.sinkClassName, callerClasses)
@@ -127,6 +138,39 @@ object UsageGeneratorCli extends App {
       callerClasses
     )
 
+    compileAndCreateJar(config, entryPointClass, sinkClass, callerClasses, instanceProviderClasses, concreteSubclasses)
+
+    if (config.runBytecode) {
+      runBytecode(config)
+    }
+  }
+
+  private def runBytecode(config: Config): Unit = {
+    ResourceBundle.clearCache(ClassLoader.getSystemClassLoader)
+
+    val classPath = Seq(
+      config.projectJarFile, // Classloader needs both library jar file
+      config.outputJarFile // as well as generated jar file
+    ) ++: config.runtimeJars // Add the runtime jars (i.e., the runtime dependencies specified by --runtime-jars)
+
+    val testedProjectClassLoader: ClassLoader = new URLClassLoader(classPath.map(_.toURI.toURL), null)
+    ResourceBundle.clearCache(testedProjectClassLoader)
+
+    val entryPointFqnClassName =
+      if (config.entryPointClassPackage.isEmpty) config.entryPointClassName
+      else config.entryPointClassPackage + '.' + config.entryPointClassName
+
+    val entryPointClass = testedProjectClassLoader.loadClass(entryPointFqnClassName)
+    val entryPointMethod = entryPointClass.getMethod(config.entryPointMethodName)
+    try {
+      entryPointMethod.invoke(null)
+    } catch {
+      case e: InvocationTargetException =>
+        System.err.println(entryPointMethod.getName + " threw " + e.getTargetException.toString)
+    }
+  }
+
+  private def compileAndCreateJar(config: Config, entryPointClass: CLASS[_], sinkClass: SinkClass, callerClasses: RefArray[CallerClass], instanceProviderClasses: InstanceProviderClasses, concreteSubclasses: Iterable[ConcreteSubclass]): Unit = {
     // Class that is called when generated jar is run using MANIFEST main. Calls all caller classes.
     val compiledEntryPointClass = Compiler.compile(entryPointClass)
     // Class that contains all sink methods.
@@ -135,8 +179,15 @@ object UsageGeneratorCli extends App {
     val compiledCallerClasses = callerClasses.map(Compiler.compile(_)).toList
     // Classes that contain methods that return an instance of a specific type.
     val compiledInstanceProviderClasses = instanceProviderClasses.providerClasses.map(Compiler.compile(_))
+    // Concrete subclasses of abstract classes // TODO: Interfaces
+    val compiledConcreteSubclasses = concreteSubclasses.map(Compiler.compile(_))
 
-    val classes = compiledEntryPointClass :: compiledSinkClass :: (compiledCallerClasses ++ compiledInstanceProviderClasses)
+    val classes: Iterable[ClassByteCode] =
+      Seq(compiledEntryPointClass) ++
+        (Seq(compiledSinkClass) ++
+          (compiledCallerClasses ++
+            (compiledInstanceProviderClasses ++
+              compiledConcreteSubclasses.view)))
 
     JarFileGenerator.writeClassFilesToJarFile(
       config.outputJarFile,
@@ -144,30 +195,20 @@ object UsageGeneratorCli extends App {
       config.force,
       Some(compiledEntryPointClass.javaClassName)
     )
+  }
 
-    if (config.runBytecode) {
-      ResourceBundle.clearCache(ClassLoader.getSystemClassLoader)
+  private def setupProject(config: Config): Project[URL] = {
+    // Silence Info level logs from opal
+    val opalLogLevel =
+      if (config.verbose) org.opalj.log.Info
+      else org.opalj.log.Warn
 
-      val classPath = Seq(
-        config.projectJarFile, // Classloader needs both library jar file
-        config.outputJarFile // as well as generated jar file
-      ) ++: config.runtimeJars // Add the runtime jars (i.e., the runtime dependencies specified by --runtime-jars)
+    OPALLogger.updateLogger(GlobalLogContext, new ConsoleOPALLogger(true, opalLogLevel))
 
-      val testedProjectClassLoader: ClassLoader = new URLClassLoader(classPath.map(_.toURI.toURL), null)
-      ResourceBundle.clearCache(testedProjectClassLoader)
-
-      val entryPointFqnClassName =
-        if (config.entryPointClassPackage.isEmpty) config.entryPointClassName
-        else config.entryPointClassPackage + '.' + config.entryPointClassName
-
-      val entryPointClass = testedProjectClassLoader.loadClass(entryPointFqnClassName)
-      val entryPointMethod = entryPointClass.getMethod(config.entryPointMethodName)
-      try {
-        entryPointMethod.invoke(null)
-      } catch {
-        case e: InvocationTargetException =>
-          System.err.println(entryPointMethod.getName + " threw " + e.getTargetException.toString)
-      }
-    }
+    Project(
+      projectFiles = Array(config.projectJarFile),
+      libraryFiles = config.runtimeJars.toArray
+      //, new ConsoleOPALLogger(true, opalLogLevel)
+    )
   }
 }

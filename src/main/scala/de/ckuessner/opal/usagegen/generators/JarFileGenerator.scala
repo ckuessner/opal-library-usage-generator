@@ -7,7 +7,7 @@ import java.nio.file.{FileAlreadyExistsException, FileSystems, Files}
 
 object JarFileGenerator {
   def writeClassFilesToJarFile(outputFile: File,
-                               classes: List[ClassByteCode],
+                               classes: Iterable[ClassByteCode],
                                overwriteOutFile: Boolean,
                                mainClass: Option[String] = None
                               ): Unit = {
