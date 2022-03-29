@@ -2,7 +2,7 @@ package de.ckuessner.opal.usagegen.generators.classes
 
 import de.ckuessner.opal.usagegen.{ConcreteStubMethod, ConcreteSubclass, ConstructorMethod, FullMethodIdentifier}
 import org.opalj.ba.{CODE, CodeElement, METHOD, PUBLIC}
-import org.opalj.br.instructions.{ALOAD, ALOAD_0, INVOKESPECIAL, RETURN}
+import org.opalj.br.instructions.{ALOAD_0, INVOKESPECIAL, LoadLocalVariableInstruction, RETURN}
 import org.opalj.br.{ClassFile, FieldType, Method}
 import org.opalj.collection.immutable.RefArray
 
@@ -60,7 +60,7 @@ object ConcreteSubclassGenerator {
     val instructions = mutable.ArrayBuilder.make[CodeElement[Nothing]]
     instructions += ALOAD_0 // Load reference to this (this as in self reference)
     superConstructor.parameterTypes.foreachWithIndex {
-      case (_: FieldType, index: Int) => instructions += ALOAD.canonicalRepresentation(index + 1)
+      case (paramType: FieldType, index: Int) => instructions += LoadLocalVariableInstruction(paramType, index + 1)
     }
     instructions += INVOKESPECIAL(superConstructor.classFile.thisType, isInterface = false, "<init>", superConstructor.descriptor)
     instructions += RETURN
