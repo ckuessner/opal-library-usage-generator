@@ -28,7 +28,7 @@ class InstanceProviderBasedParameterGenerator(val parameterGeneratorPackageName:
     )))
 
   private def methodNameForType(objectType: ObjectType): String =
-    unqualifiedNameIllegalCharsPattern.matcher(objectType.toJVMTypeName).replaceAll("_")
+    unqualifiedNameIllegalCharsPattern.matcher(objectType.fqn).replaceAll("_")
 
   private def generateParameterSelectionMethod(objectType: ObjectType, providerMethods: Seq[InstanceProviderMethod]): AuxiliaryMethod = {
     val methodName = methodNameForType(objectType)

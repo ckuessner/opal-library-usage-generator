@@ -49,7 +49,7 @@ object DefaultValueGenerator {
         },
         // primitive to object boxing
         INVOKESTATIC(
-          declaringClass = objectType.toJVMTypeName,
+          declaringClass = objectType.fqn,
           isInterface = false,
           methodName = "valueOf",
           methodDescriptor = s"(${unboxedType.toJVMTypeName})L${objectType.toJVMTypeName};"

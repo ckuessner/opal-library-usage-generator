@@ -211,7 +211,7 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
         else
           stubSubClass.get.jvmClassName
       } else {
-        calledConstructor.classFile.thisType.toJVMTypeName
+        calledConstructor.classFile.thisType.fqn
       },
       isInterface = false,
       "<init>",
