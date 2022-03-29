@@ -31,7 +31,7 @@ object JarFileGenerator {
     jarManifest.getMainAttributes.put(java.util.jar.Attributes.Name.MANIFEST_VERSION, "1.0")
 
     if (mainClass.isDefined) {
-      jarManifest.getMainAttributes.put(java.util.jar.Attributes.Name.MANIFEST_VERSION, mainClass.get)
+      jarManifest.getMainAttributes.put(java.util.jar.Attributes.Name.MAIN_CLASS, mainClass.get)
     }
 
     // Add jar manifest to jar
