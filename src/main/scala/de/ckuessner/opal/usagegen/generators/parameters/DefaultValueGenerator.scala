@@ -35,7 +35,7 @@ object DefaultValueGenerator {
   def defaultValueForObjectType(objectType: ObjectType): Array[CodeElement[Nothing]] = objectType match {
     case ObjectType.String => Array(LoadString_W(""))
 
-    case ObjectType.Boolean => Array(GETSTATIC("java/lang/Boolean", "FALSE", "java/lang/Boolean"))
+    case ObjectType.Boolean => Array(GETSTATIC("java/lang/Boolean", "FALSE", "Ljava/lang/Boolean;"))
 
     case ObjectType.Integer | ObjectType.Byte | ObjectType.Short | ObjectType.Character | ObjectType.Long | ObjectType.Float | ObjectType.Double => {
       val unboxedType = unboxNumericObjectType(objectType)
@@ -52,7 +52,7 @@ object DefaultValueGenerator {
           declaringClass = objectType.toJVMTypeName,
           isInterface = false,
           methodName = "valueOf",
-          methodDescriptor = s"(${unboxedType.toJVMTypeName}L${objectType.toJVMTypeName};"
+          methodDescriptor = s"(${unboxedType.toJVMTypeName})L${objectType.toJVMTypeName};"
         )
       )
     }
