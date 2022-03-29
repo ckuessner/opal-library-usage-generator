@@ -21,7 +21,7 @@ class InstanceSearcherTest extends AnyFlatSpec with BeforeAndAfterAll {
   implicit def stringToObjectType(obj: String): ObjectType = ObjectType(obj)
 
   override protected def beforeAll(): Unit = {
-    val jarFile = Paths.get(getClass.getResource("/instancesearchertest.jar").toURI)
+    val jarFile = Paths.get(getClass.getResource("/instancesearcherTestResources.jar").toURI)
     project = Project(jarFile.toFile, DevNullLogger)
     instanceSearcher = InstanceSearcher(project, RefArray.empty)
   }

@@ -28,7 +28,10 @@ lazy val root: Project = project
     },
     assembly / assemblyMergeStrategy := discardModuleInfoMergeStrategy,
 
-    Test / compile := ((Test / compile) dependsOn (instancesearchertest / copyJarToTestResources)).value
+    Test / compile := (Test / compile).dependsOn(
+      instancesearcherTestResources / copyJarToTestResources,
+      interfacesTestResources / copyJarToTestResources
+    ).value
   )
 
 lazy val discardModuleInfoMergeStrategy: (String => sbtassembly.MergeStrategy) = {
@@ -38,13 +41,28 @@ lazy val discardModuleInfoMergeStrategy: (String => sbtassembly.MergeStrategy) =
 
 val copyJarToTestResources = taskKey[Unit]("Copy jar from packageBin to root test resources")
 
-val instancesearchertest = project.in(file("testfiles/instancesearcher/"))
+val instancesearcherTestResources = project.in(file("testfiles/instancesearcher/"))
   .settings(
     Compile / javacOptions ++= Seq("-source", "8", "-target", "8"),
     copyJarToTestResources := {
       (Compile / compile).value
       val sourceFile = (Compile / packageBin).value
-      val targetFile = root.base / "src/test/resources/instancesearchertest.jar"
-      IO.copyFile(sourceFile, targetFile, CopyOptions(overwrite = true, preserveLastModified = false, preserveExecutable = false))
+      doCopyJarToTestResources(sourceFile)
     },
   )
+
+val interfacesTestResources = project.in(file("testfiles/interfaces/"))
+  .settings(
+    Compile / javacOptions ++= Seq("-source", "8", "-target", "8"),
+    copyJarToTestResources := {
+      (Compile / compile).value
+      val sourceFile = (Compile / packageBin).value
+      doCopyJarToTestResources(sourceFile)
+    },
+  )
+
+def doCopyJarToTestResources(sourceFile: File): Unit = {
+  val targetFileName = sourceFile.getName.replaceFirst("_\\d\\..*-SNAPSHOT", "")
+  val targetFile = root.base / "src/test/resources" / targetFileName
+  IO.copyFile(sourceFile, targetFile, CopyOptions(overwrite = true, preserveLastModified = false, preserveExecutable = false))
+}

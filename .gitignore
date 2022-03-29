@@ -6,3 +6,4 @@ target
 *.jar
 /testfiles/*
 !/testfiles/instancesearcher/
+!/testfiles/interfaces/
