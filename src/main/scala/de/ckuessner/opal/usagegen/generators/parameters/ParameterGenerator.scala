@@ -94,7 +94,8 @@ trait ParameterGenerator {
 }
 
 object ParameterGenerator {
-  def selectFirstNonNullParameterFromInstanceProviderMethods(instanceProviderMethods: Seq[InstanceProviderMethod]
+  def selectFirstNonNullParameterFromInstanceProviderMethods(instanceProviderMethods: Seq[InstanceProviderMethod],
+                                                             fallbackValueInstructions: Array[CodeElement[Nothing]]
                                                             ): Array[CodeElement[Nothing]] = {
 
     // Call instance provider methods until we have a non-null reference
@@ -114,6 +115,10 @@ object ParameterGenerator {
       methodBody += ALOAD_0
       methodBody += IFNONNULL(returnInstanceSymbol) // Return value, if non null
     }
+
+    // Store fallback value in local var 0
+    methodBody ++= fallbackValueInstructions
+    methodBody += ASTORE_0
 
     methodBody += LabelElement(returnInstanceSymbol)
     methodBody += ALOAD_0 // This might be null

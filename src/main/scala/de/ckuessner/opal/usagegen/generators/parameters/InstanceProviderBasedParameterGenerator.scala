@@ -5,12 +5,12 @@ import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.{packageA
 import de.ckuessner.opal.usagegen.generators.parameters.DefaultValueGenerator.defaultValueForFieldType
 import de.ckuessner.opal.usagegen.generators.parameters.ParameterGenerator.selectFirstNonNullParameterFromInstanceProviderMethods
 import org.opalj.ba.{CODE, CodeElement, METHOD, PUBLIC}
-import org.opalj.br.instructions.{ACONST_NULL, INVOKESTATIC}
+import org.opalj.br.instructions.INVOKESTATIC
 import org.opalj.br.{FieldType, Method, MethodDescriptor, ObjectType}
 import org.opalj.collection.immutable.RefArray
 
-class InstanceProviderBasedParameterGenerator(val packageName: String,
-                                              val className: String,
+class InstanceProviderBasedParameterGenerator(val parameterGeneratorPackageName: String,
+                                              val parameterGeneratorClassName: String,
                                               providers: Map[ObjectType, Seq[InstanceProviderMethod]]) extends ParameterGenerator {
 
   private val preferParameterlessSourcesOrdering: Ordering[InstanceProviderMethod] =
@@ -20,7 +20,7 @@ class InstanceProviderBasedParameterGenerator(val packageName: String,
       else 1
 
   override val generatedClasses: Seq[GeneratedClass] = Seq(AuxiliaryClass(
-    packageName, className,
+    parameterGeneratorPackageName, parameterGeneratorClassName,
     RefArray._UNSAFE_from(
       providers.map { case (objectType: ObjectType, instanceProviderMethods) =>
         generateParameterSelectionMethod(objectType, instanceProviderMethods)
@@ -34,13 +34,16 @@ class InstanceProviderBasedParameterGenerator(val packageName: String,
     val methodName = methodNameForType(objectType)
     val signature = MethodDescriptor.withNoArgs(objectType).toJVMDescriptor
     AuxiliaryMethod(
-      FullMethodIdentifier(packageName, className, methodName, signature),
+      FullMethodIdentifier(parameterGeneratorPackageName, parameterGeneratorClassName, methodName, signature),
       METHOD(
         PUBLIC.STATIC,
         methodName,
         signature,
         CODE(
-          selectFirstNonNullParameterFromInstanceProviderMethods(providerMethods.sorted(preferParameterlessSourcesOrdering))
+          selectFirstNonNullParameterFromInstanceProviderMethods(
+            providerMethods.sorted(preferParameterlessSourcesOrdering),
+            defaultValueForFieldType(objectType)
+          )
         )
       )
     )
@@ -51,25 +54,16 @@ class InstanceProviderBasedParameterGenerator(val packageName: String,
   }
 
   override def generateParameter(parameterType: FieldType): Array[CodeElement[Nothing]] = {
-    val defaultValue: Array[CodeElement[Nothing]] = defaultValueForFieldType(parameterType)
-
     if (parameterType.isObjectType) {
-      val methodCall = INVOKESTATIC(
-        packageAndClassToJvmClassName(packageName, className),
-        isInterface = false,
-        methodNameForType(parameterType.asObjectType),
-        MethodDescriptor.withNoArgs(parameterType.asObjectType).toJVMDescriptor
-      )
-      if (!defaultValue(0).equals(CodeElement.instructionToInstructionElement(ACONST_NULL))) {
-        val bytecode = new Array[CodeElement[Nothing]](defaultValue.length + 1)
-        bytecode(0) = methodCall
-        defaultValue.copyToArray(bytecode, 1)
-        return bytecode
-      } else {
-        return Array(methodCall)
-      }
+      Array(
+        INVOKESTATIC(
+          packageAndClassToJvmClassName(parameterGeneratorPackageName, parameterGeneratorClassName),
+          isInterface = false,
+          methodNameForType(parameterType.asObjectType),
+          MethodDescriptor.withNoArgs(parameterType.asObjectType).toJVMDescriptor
+        ))
+    } else {
+      defaultValueForFieldType(parameterType)
     }
-
-    defaultValue
   }
 }

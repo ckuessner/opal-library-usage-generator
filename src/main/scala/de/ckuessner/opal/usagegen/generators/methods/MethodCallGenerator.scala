@@ -328,8 +328,9 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
                                                localVarIndex: Int
                                               ): Array[CodeElement[Nothing]] = {
 
-    val instantiationCode = parameterGenerator.generateInstance(calledMethod.classFile.thisType, calledMethod)
+    val instantiationCode: Array[CodeElement[Nothing]] = parameterGenerator.generateInstance(calledMethod.classFile.thisType, calledMethod)
     val code = new Array[CodeElement[Nothing]](instantiationCode.length + 1)
+    instantiationCode.copyToArray(code)
     code(instantiationCode.length) = ASTORE.canonicalRepresentation(localVarIndex)
     code
   }
