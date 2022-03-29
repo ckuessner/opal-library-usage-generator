@@ -1,10 +1,10 @@
 package de.ckuessner.opal.usagegen.generators.parameters
 
 import de.ckuessner.opal.usagegen.analyses._
-import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.unqualifiedNameIllegalCharsPattern
+import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.{tryCatchBlock, unqualifiedNameIllegalCharsPattern}
 import de.ckuessner.opal.usagegen.generators.parameters.InstanceProviderGenerator.instanceProviderMethodName
 import de.ckuessner.opal.usagegen.{FullMethodIdentifier, InstanceProviderClass, InstanceProviderMethod}
-import org.opalj.ba.{CATCH, CODE, CodeElement, METHOD, PUBLIC, TRY, TRYEND}
+import org.opalj.ba.{CODE, CodeElement, METHOD, PUBLIC}
 import org.opalj.br.instructions.{ACONST_NULL, ARETURN, DUP, GETSTATIC, INVOKESPECIAL, INVOKESTATIC, NEW}
 import org.opalj.br.{MethodDescriptor, ObjectType}
 import org.opalj.collection.immutable.RefArray
@@ -53,7 +53,7 @@ class InstanceProviderGenerator(private val parameterGenerator: ParameterGenerat
   }
 
   private def generateInstanceCreationByteCode(instanceSource: InstanceSource): Array[CodeElement[Nothing]] = {
-    instanceSource match {
+    val code: Array[CodeElement[Nothing]] = instanceSource match {
       case ConstructorInstanceSource(objectType, constructorMethod) =>
         val code = mutable.ArrayBuilder.make[CodeElement[Nothing]]()
         code += NEW(objectType)
@@ -89,11 +89,8 @@ class InstanceProviderGenerator(private val parameterGenerator: ParameterGenerat
         ARETURN
       )
 
-      case StaticMethodInstanceSource(_, staticMethod) => {
+      case StaticMethodInstanceSource(_, staticMethod) =>
         val code = mutable.ArrayBuilder.make[CodeElement[Nothing]]()
-
-        val exceptionSymbol = Symbol("method call to instance source method")
-        TRY(exceptionSymbol)
         code ++= parameterGenerator.generateAllParameters(staticMethod)
         code += INVOKESTATIC(
           staticMethod.classFile.thisType,
@@ -102,15 +99,10 @@ class InstanceProviderGenerator(private val parameterGenerator: ParameterGenerat
           staticMethod.descriptor
         )
         code += ARETURN
-        TRYEND(exceptionSymbol)
-
-        CATCH(exceptionSymbol, 0)
-        code += ACONST_NULL
-        code += ARETURN
-
         code.result()
-      }
     }
+
+    tryCatchBlock(code, Seq(ACONST_NULL, ARETURN), Symbol("exception in instance source"))
   }
 }
 
