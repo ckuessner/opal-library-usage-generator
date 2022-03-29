@@ -1,24 +1,25 @@
-package de.ckuessner.opal.usagegen.generators
+package de.ckuessner.opal.usagegen.generators.parameters
 
-import org.opalj.ba.InstructionElement
+import org.opalj.ba.CodeElement
+import org.opalj.ba.CodeElement.instructionToInstructionElement
 import org.opalj.br._
 import org.opalj.br.instructions.{ACONST_NULL, ANEWARRAY, DCONST_0, FCONST_0, GETSTATIC, ICONST_0, INVOKESTATIC, LCONST_0, LoadString_W, MULTIANEWARRAY, NEWARRAY}
 
 import scala.collection.mutable.ArrayBuffer
 
-object DefaultValueLoadingGenerator {
-  def defaultValuesForFieldTypes(fieldTypes: FieldTypes): Seq[InstructionElement] = {
+object DefaultValueGenerator {
+  def defaultValuesForFieldTypes(fieldTypes: FieldTypes): Seq[CodeElement[Nothing]] = {
     fieldTypes.map(fieldType => defaultValueForFieldType(fieldType)).flatten
   }
 
-  private def defaultValueForNumericType(numericType: NumericType): InstructionElement = numericType match {
+  def defaultValueForNumericType(numericType: NumericType): CodeElement[Nothing] = numericType match {
     case _: IntLikeType => ICONST_0
     case _: DoubleType => DCONST_0
     case _: FloatType => FCONST_0
     case _: LongType => LCONST_0
   }
 
-  private def unboxNumericObjectType(objectType: ObjectType): BaseType = {
+  def unboxNumericObjectType(objectType: ObjectType): BaseType = {
     objectType match {
       case ObjectType.Boolean => BooleanType
       case ObjectType.Byte => ByteType
@@ -31,7 +32,7 @@ object DefaultValueLoadingGenerator {
     }
   }
 
-  private def defaultValueForObjectType(objectType: ObjectType): Array[InstructionElement] = objectType match {
+  def defaultValueForObjectType(objectType: ObjectType): Array[CodeElement[Nothing]] = objectType match {
     case ObjectType.String => Array(LoadString_W(""))
 
     case ObjectType.Boolean => Array(GETSTATIC("java/lang/Boolean", "FALSE", "java/lang/Boolean"))
@@ -60,15 +61,15 @@ object DefaultValueLoadingGenerator {
     case _ => Array(ACONST_NULL)
   }
 
-  def defaultValueForFieldType(fieldType: FieldType): Array[InstructionElement] = {
+  def defaultValueForFieldType(fieldType: FieldType): Array[CodeElement[Nothing]] = {
     if (fieldType.isObjectType) {
       return defaultValueForObjectType(fieldType.asObjectType)
     }
 
-    val code = ArrayBuffer.empty[InstructionElement]
+    val code = ArrayBuffer.empty[CodeElement[Nothing]]
     fieldType match {
       case arrayType: ArrayType => {
-        code ++= (1 to arrayType.dimensions).map(_ => InstructionElement(ICONST_0))
+        code ++= (1 to arrayType.dimensions).map(_ => instructionToInstructionElement(ICONST_0))
 
         // Nested array
         if (arrayType.dimensions > 1) {

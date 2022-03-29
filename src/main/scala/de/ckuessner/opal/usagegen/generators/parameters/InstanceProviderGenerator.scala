@@ -1,21 +1,21 @@
-package de.ckuessner.opal.usagegen.generators
+package de.ckuessner.opal.usagegen.generators.parameters
 
-import de.ckuessner.opal.usagegen.analyses.{ConstructorInstanceSource, InstanceSource, StaticFieldInstanceSource, StaticMethodInstanceSource}
-import de.ckuessner.opal.usagegen.generators.InstanceProviderGenerator.instanceProviderMethodName
+import de.ckuessner.opal.usagegen.analyses._
+import InstanceProviderGenerator.instanceProviderMethodName
 import de.ckuessner.opal.usagegen.{FullMethodIdentifier, InstanceProviderClass, InstanceProviderMethod}
-import org.opalj.ba.{CATCH, CODE, InstructionElement, METHOD, PUBLIC, TRY, TRYEND}
+import org.opalj.ba.{CATCH, CODE, CodeElement, METHOD, PUBLIC, TRY, TRYEND}
 import org.opalj.br.instructions.{ACONST_NULL, ARETURN, DUP, GETSTATIC, INVOKESPECIAL, INVOKESTATIC, NEW}
-import org.opalj.br.{FieldTypes, MethodDescriptor, ObjectType}
+import org.opalj.br.{MethodDescriptor, ObjectType}
 import org.opalj.collection.immutable.RefArray
 
 import scala.collection.mutable
 
-class InstanceProviderGenerator(private val parameterProvider: FieldTypes => Seq[InstructionElement],
+class InstanceProviderGenerator(private val parameterGenerator: ParameterGenerator,
                                 private val providerClassName: String
                                ) {
 
   def generateInstanceProviderClasses(instanceSources: Iterable[InstanceSource]): InstanceProviderClasses = {
-    val generatedClasses = instanceSources.groupBy(_.sourceClassFile.thisType.packageName) // One class per package
+    val generatedClasses = instanceSources.groupBy(_.sourcePackage) // One class per package
       .map { case (packageName, instanceSources) =>
         val methods = instanceSources
           .zipWithIndex // To ensure that the provider method name is unique, a unique index is attached
@@ -46,13 +46,13 @@ class InstanceProviderGenerator(private val parameterProvider: FieldTypes => Seq
     )
   }
 
-  private def generateInstanceCreationByteCode(instanceSource: InstanceSource): Array[InstructionElement] = {
+  private def generateInstanceCreationByteCode(instanceSource: InstanceSource): Array[CodeElement[Nothing]] = {
     instanceSource match {
       case ConstructorInstanceSource(objectType, constructorMethod) =>
-        val code = mutable.ArrayBuilder.make[InstructionElement]()
+        val code = mutable.ArrayBuilder.make[CodeElement[Nothing]]()
         code += NEW(objectType)
         code += DUP
-        code ++= parameterProvider(constructorMethod.parameterTypes)
+        code ++= parameterGenerator.generateAllParameters(constructorMethod)
         code += INVOKESPECIAL(
           objectType,
           isInterface = false,
@@ -62,17 +62,33 @@ class InstanceProviderGenerator(private val parameterProvider: FieldTypes => Seq
         code += ARETURN
         code.result()
 
+      case StubSubclassInstanceSource(_, stubClass, constructorMethod) =>
+        val code = mutable.ArrayBuilder.make[CodeElement[Nothing]]()
+        code += NEW(stubClass.jvmClassName)
+        code += DUP
+        MethodDescriptor.apply(constructorMethod.methodId.descriptor).parameterTypes.foreach { paramType =>
+          code ++= parameterGenerator.generateParameter(paramType)
+        }
+        code += INVOKESPECIAL(
+          stubClass.jvmClassName,
+          isInterface = false,
+          constructorMethod.methodId.methodName,
+          constructorMethod.methodId.descriptor,
+        )
+        code += ARETURN
+        code.result()
+
       case StaticFieldInstanceSource(_, field) => Array(
         GETSTATIC(field.classFile.thisType, field.name, field.fieldType),
         ARETURN
       )
 
-      case StaticMethodInstanceSource(_, staticMethod) =>
-        val code = mutable.ArrayBuilder.make[InstructionElement]()
+      case StaticMethodInstanceSource(_, staticMethod) => {
+        val code = mutable.ArrayBuilder.make[CodeElement[Nothing]]()
 
         val exceptionSymbol = Symbol("method call to instance source method")
         TRY(exceptionSymbol)
-        code ++= parameterProvider(staticMethod.parameterTypes)
+        code ++= parameterGenerator.generateAllParameters(staticMethod)
         code += INVOKESTATIC(
           staticMethod.classFile.thisType,
           isInterface = false,
@@ -87,15 +103,16 @@ class InstanceProviderGenerator(private val parameterProvider: FieldTypes => Seq
         code += ARETURN
 
         code.result()
+      }
     }
   }
 }
 
 object InstanceProviderGenerator {
-  def apply(parameterProvider: FieldTypes => Seq[InstructionElement],
+  def apply(parameterGenerator: ParameterGenerator,
             providerClassName: String
            ): InstanceProviderGenerator = {
-    new InstanceProviderGenerator(parameterProvider, providerClassName)
+    new InstanceProviderGenerator(parameterGenerator, providerClassName)
   }
 
   private def instanceProviderMethodName(instanceSource: InstanceSource, uniqueIndex: Int): String = {
@@ -103,6 +120,7 @@ object InstanceProviderGenerator {
       case ConstructorInstanceSource(_, _) => "using_constructor"
       case StaticFieldInstanceSource(_, _) => "using_field"
       case StaticMethodInstanceSource(_, _) => "using_method"
+      case StubSubclassInstanceSource(_, _, _) => "using_stub_subclass"
     }
 
     s"${verb}__${instanceSource.instanceType.simpleName}__$uniqueIndex"

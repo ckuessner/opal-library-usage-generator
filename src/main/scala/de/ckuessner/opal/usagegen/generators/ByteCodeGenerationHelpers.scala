@@ -8,7 +8,7 @@ import java.util.regex.Pattern
 import scala.collection.mutable
 
 object ByteCodeGenerationHelpers {
-  def storeInstruction(theType: Type, index: Int): StoreLocalVariableInstruction = {
+  def storeInstruction(theType: FieldType, index: Int): StoreLocalVariableInstruction = {
     theType match {
       case _: ReferenceType => ASTORE(index)
       case _: IntLikeType => ISTORE(index)
@@ -19,7 +19,7 @@ object ByteCodeGenerationHelpers {
     }
   }
 
-  def loadInstruction(theType: Type, index: Int): LoadLocalVariableInstruction = {
+  def loadInstruction(theType: FieldType, index: Int): LoadLocalVariableInstruction = {
     theType match {
       case _: ReferenceType => ALOAD(index)
       case _: IntLikeType => ILOAD(index)
