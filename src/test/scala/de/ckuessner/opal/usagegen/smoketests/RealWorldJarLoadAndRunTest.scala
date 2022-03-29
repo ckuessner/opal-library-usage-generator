@@ -48,11 +48,11 @@ class RealWorldJarLoadAndRunTest extends AnyFlatSpec with BeforeAndAfterAll {
   }
 
   it should "not fail for library guava" in {
-    run(dependencies(0))
+    run(dependencies(1))
   }
 
   it should "not fail for library jackson-core" in {
-    run(dependencies(0))
+    run(dependencies(2))
   }
 
 }
