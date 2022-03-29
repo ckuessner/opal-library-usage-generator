@@ -138,7 +138,7 @@ object UsageGeneratorCli extends App {
       callerClasses
     )
 
-    compileAndCreateJar(config, entryPointClass, sinkClass, callerClasses, instanceProviderClasses, concreteSubclasses)
+    compileAndCreateJar(config, entryPointClass, sinkClass, callerClasses, parameterGenerator.generatedClasses, instanceProviderClasses, concreteSubclasses)
 
     if (config.runBytecode) {
       runBytecode(config)
@@ -170,13 +170,23 @@ object UsageGeneratorCli extends App {
     }
   }
 
-  private def compileAndCreateJar(config: Config, entryPointClass: CLASS[_], sinkClass: SinkClass, callerClasses: RefArray[CallerClass], instanceProviderClasses: InstanceProviderClasses, concreteSubclasses: Iterable[ConcreteSubclass]): Unit = {
+  private def compileAndCreateJar(config: Config,
+                                  entryPointClass: CLASS[_],
+                                  sinkClass: SinkClass,
+                                  callerClasses: Seq[CallerClass],
+                                  parameterGeneratorClasses: Seq[GeneratedClass],
+                                  instanceProviderClasses: InstanceProviderClasses,
+                                  concreteSubclasses: Iterable[ConcreteSubclass]
+                                 ): Unit = {
+
     // Class that is called when generated jar is run using MANIFEST main. Calls all caller classes.
     val compiledEntryPointClass = Compiler.compile(entryPointClass)
     // Class that contains all sink methods.
     val compiledSinkClass = Compiler.compile(sinkClass)
     // Classes with methods that each call one method of the tested library.
     val compiledCallerClasses = callerClasses.map(Compiler.compile(_)).toList
+    // Classes that provide parameters
+    val compiledParameterGeneratorClasses = parameterGeneratorClasses.map(Compiler.compile(_))
     // Classes that contain methods that return an instance of a specific type.
     val compiledInstanceProviderClasses = instanceProviderClasses.providerClasses.map(Compiler.compile(_))
     // Concrete subclasses of abstract classes // TODO: Interfaces
@@ -186,8 +196,9 @@ object UsageGeneratorCli extends App {
       Seq(compiledEntryPointClass) ++
         (Seq(compiledSinkClass) ++
           (compiledCallerClasses ++
-            (compiledInstanceProviderClasses ++
-              compiledConcreteSubclasses.view)))
+            (compiledParameterGeneratorClasses ++
+              (compiledInstanceProviderClasses ++
+                compiledConcreteSubclasses.view))))
 
     JarFileGenerator.writeClassFilesToJarFile(
       config.outputJarFile,

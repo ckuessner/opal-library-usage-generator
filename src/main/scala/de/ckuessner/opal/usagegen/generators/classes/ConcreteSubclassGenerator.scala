@@ -4,6 +4,7 @@ import de.ckuessner.opal.usagegen.{ConcreteStubMethod, ConcreteSubclass, Constru
 import org.opalj.ba.{CODE, CodeElement, METHOD, PUBLIC}
 import org.opalj.br.instructions.{ALOAD, ALOAD_0, INVOKESPECIAL, RETURN}
 import org.opalj.br.{ClassFile, FieldType, Method}
+import org.opalj.collection.immutable.RefArray
 
 import scala.collection.mutable
 
@@ -12,17 +13,31 @@ import scala.collection.mutable
  */
 object ConcreteSubclassGenerator {
   def generateConcreteSubclass(abstractClass: ClassFile): Option[ConcreteSubclass] = {
-    // If the abstractClass doesn't have any non-private constructors, no subclass can be generated
-    if (abstractClass.constructors.forall(_.isPrivate)) {
-      return None
-    }
-
     val destinationPackage = abstractClass.thisType.packageName
     val generatedClassName = abstractClass.thisType.simpleName + "___GENERATED_CONCRETE_SUBCLASS"
 
-    val constructorMethods = abstractClass.methods.filter(_.isConstructor).map(
-      superConstructor => generateConstructorMethod(destinationPackage, generatedClassName, superConstructor)
-    )
+    var constructorMethods: RefArray[ConstructorMethod] = null
+
+    if (abstractClass.isInterfaceDeclaration) {
+      // Interfaces don't have constructors, call Object.<init>()V directly
+      constructorMethods = RefArray[ConstructorMethod](
+        ConstructorMethod(
+          FullMethodIdentifier(destinationPackage, generatedClassName, "<init>", "()V"),
+          METHOD(
+            PUBLIC,
+            "<init>",
+            "()V",
+            CODE(ALOAD_0, INVOKESPECIAL("java/lang/Object", isInterface = false, "<init>", "()V"), RETURN)
+          )
+        ))
+    } else if (abstractClass.constructors.forall(_.isPrivate)) {
+      // If the abstractClass doesn't have any non-private constructors, no subclass can be generated
+      return None
+    } else {
+      constructorMethods = abstractClass.methods.filter(_.isConstructor).map(
+        superConstructor => generateConstructorMethod(destinationPackage, generatedClassName, superConstructor)
+      )
+    }
 
     // Override abstract methods with stubs
     val overriddenMethods = abstractClass.methods.filter(_.isAbstract)

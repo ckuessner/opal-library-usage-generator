@@ -3,7 +3,7 @@ package de.ckuessner.opal.usagegen
 import de.ckuessner.opal.usagegen.analyses.{InstanceSource, StubSubclassInstanceSource}
 import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.packageAndClassToJvmClassName
 import de.ckuessner.opal.usagegen.generators.classes.ClassGenerator
-import org.opalj.ba.{CLASS, METHODS}
+import org.opalj.ba.{CLASS, METHODS, PUBLIC}
 import org.opalj.br.ClassFile
 import org.opalj.collection.immutable.RefArray
 
@@ -16,7 +16,7 @@ sealed trait GeneratedClass {
 
   def jvmClassName: String = packageAndClassToJvmClassName(packageName, className)
 
-  def asClass: CLASS[_] = {
+  def asCLASS: CLASS[_] = {
     val methods = METHODS(RefArray._UNSAFE_from(this.methods.map(_.methodBody).toArray))
     ClassGenerator.generatePublicClass(packageName, className, methods)
   }
@@ -46,6 +46,23 @@ case class ConcreteSubclass(packageName: String,
                             concreteStubMethods: RefArray[GeneratedMethod],
                             constructorMethods: RefArray[ConstructorMethod]
                            ) extends GeneratedClass {
+
+  override def asCLASS: CLASS[_] = {
+    val methods: METHODS[_] = METHODS(RefArray._UNSAFE_from(this.methods.map(_.methodBody).toArray))
+    val classTypeString = packageAndClassToJvmClassName(packageName, className)
+
+    CLASS(
+      accessModifiers = PUBLIC.SUPER,
+      thisType = classTypeString,
+      methods = methods,
+      superclassType =
+        if (abstractSuperClass.isInterfaceDeclaration) Some("java/lang/Object")
+        else Some(abstractSuperClass.thisType.fqn),
+      interfaceTypes =
+        if (abstractSuperClass.isInterfaceDeclaration) RefArray(abstractSuperClass.thisType.fqn)
+        else RefArray.empty
+    )
+  }
 
   override def methods: RefArray[GeneratedMethod] = concreteStubMethods ++ constructorMethods
 

@@ -14,7 +14,7 @@ trait Compilable[T] {
 
 object Compilable {
   implicit def generatedClassCompiler[T <: GeneratedClass]: Compilable[T] = (generatedClass: GeneratedClass) => {
-    val classFile = generatedClass.asClass.toDA._1
+    val classFile = generatedClass.asCLASS.toDA._1
     val byteCode = org.opalj.bc.Assembler(classFile)
     ClassByteCode(generatedClass.jvmClassName, byteCode)
   }
