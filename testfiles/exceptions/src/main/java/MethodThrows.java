@@ -12,4 +12,8 @@ public class MethodThrows {
     public static void failWithDeclaredException() throws IOException {
         throw new IOException();
     }
+
+    public static void failWithOtherThanDeclaredException() throws IOException {
+        throw new NullPointerException();
+    }
 }
