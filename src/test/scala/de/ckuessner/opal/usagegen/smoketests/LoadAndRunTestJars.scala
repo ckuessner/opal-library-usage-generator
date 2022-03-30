@@ -8,7 +8,7 @@ import java.nio.file.{Files, Paths}
 class LoadAndRunTestJars extends AnyFlatSpec {
 
   def testProject(testProjectJarBaseName: String): Unit = {
-    val jarFile = Paths.get(getClass.getResource(s"/$testProjectJarBaseName.jar").toURI)
+    val jarFile = Paths.get(getClass.getResource(s"/$testProjectJarBaseName").toURI)
 
     val outputFile = Files.createTempFile(s"usagegen-smoketest-output-", ".jar")
 
@@ -20,11 +20,15 @@ class LoadAndRunTestJars extends AnyFlatSpec {
   }
 
   "Interface Test Jar" should "not fail" in {
-    testProject("interfacesTestResources")
+    testProject("interfacestestresources.jar")
+  }
+
+  "Exceptions Test Jar" should "not fail" in {
+    testProject("exceptionstestresources.jar")
   }
 
   "Instance Searcher Test Jar" should "not fail" in {
-    testProject("instancesearcherTestResources")
+    testProject("instancesearchertestresources.jar")
   }
 
 }

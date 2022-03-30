@@ -30,7 +30,8 @@ lazy val root: Project = project
 
     Test / compile := (Test / compile).dependsOn(
       instancesearcherTestResources / copyJarToTestResources,
-      interfacesTestResources / copyJarToTestResources
+      interfacesTestResources / copyJarToTestResources,
+      exceptionsTestResources / copyJarToTestResources
     ).value
   )
 
@@ -52,6 +53,16 @@ val instancesearcherTestResources = project.in(file("testfiles/instancesearcher/
   )
 
 val interfacesTestResources = project.in(file("testfiles/interfaces/"))
+  .settings(
+    Compile / javacOptions ++= Seq("-source", "8", "-target", "8"),
+    copyJarToTestResources := {
+      (Compile / compile).value
+      val sourceFile = (Compile / packageBin).value
+      doCopyJarToTestResources(sourceFile)
+    },
+  )
+
+val exceptionsTestResources = project.in(file("testfiles/exceptions/"))
   .settings(
     Compile / javacOptions ++= Seq("-source", "8", "-target", "8"),
     copyJarToTestResources := {
