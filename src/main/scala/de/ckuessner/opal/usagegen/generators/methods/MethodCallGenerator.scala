@@ -6,7 +6,7 @@ import de.ckuessner.opal.usagegen.{CallerMethod, ConcreteSubclass, FullMethodIde
 import org.opalj.ba.CodeElement._
 import org.opalj.ba.{CODE, CodeElement, METHOD, PUBLIC}
 import org.opalj.br._
-import org.opalj.br.instructions.{ALOAD, ALOAD_0, ALOAD_1, ASTORE, ASTORE_0, ASTORE_1, DUP, INVOKESPECIAL, INVOKESTATIC, INVOKEVIRTUAL, LoadLocalVariableInstruction, NEW, RETURN, StoreLocalVariableInstruction}
+import org.opalj.br.instructions.{INVOKESPECIAL, INVOKESTATIC, INVOKEVIRTUAL, LoadLocalVariableInstruction, NEW, RETURN, StoreLocalVariableInstruction}
 import org.opalj.collection.immutable.RefArray
 
 import scala.collection.mutable
@@ -68,6 +68,10 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
                                        sinkId: FullMethodIdentifier,
                                        exceptionSinkId: FullMethodIdentifier): METHOD[_] = {
 
+    val returnValueLVarIndex = 0
+    val exceptionLVarIndex = 1
+    val parameterLVarIndexStart = 2
+
     // Check if really static, (non-abstract is implied by static)
     if (calledMethod.isNotStatic) {
       throw new IllegalArgumentException("method to call must be static")
@@ -76,7 +80,7 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
     val methodBody = mutable.ArrayBuilder.make[CodeElement[Nothing]]
 
     // Load default parameters onto stack, store reference types as locals to pass to sink after call
-    methodBody ++= createParametersAndStoreObjectParametersToLocalVariables(calledMethod, 1)
+    methodBody ++= createParametersAndStoreObjectParametersToLocalVariables(calledMethod, parameterLVarIndexStart)
 
     // Call method of tested library
     val methodCallCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
@@ -88,13 +92,13 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
     )
 
     // The return value (if non-void) is on the stack after the method call
-    methodCallCode ++= loadObjectParametersAndCallSinkAndReturn(calledMethod.parameterTypes, sinkId, 1)
+    methodCallCode ++= loadObjectParametersAndCallSinkAndReturn(calledMethod.parameterTypes, sinkId, parameterLVarIndexStart)
 
     // Handle Exception: pass everything to exception sink
     val exceptionHandlingCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]()
-    exceptionHandlingCode += ASTORE_0
-    exceptionHandlingCode += ALOAD_0
-    exceptionHandlingCode ++= loadObjectParametersAndCallSinkAndReturn(calledMethod.parameterTypes, exceptionSinkId, 1)
+    exceptionHandlingCode += StoreLocalVariableInstruction(ObjectType.Throwable, exceptionLVarIndex)
+    exceptionHandlingCode += LoadLocalVariableInstruction(ObjectType.Throwable, exceptionLVarIndex)
+    exceptionHandlingCode ++= loadObjectParametersAndCallSinkAndReturn(calledMethod.parameterTypes, exceptionSinkId, parameterLVarIndexStart)
 
     methodBody ++= tryCatchBlock(
       methodCallCode.result(),
@@ -179,6 +183,12 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
                                       exceptionSinkId: FullMethodIdentifier
                                      ): METHOD[_] = {
 
+    val instanceLVarIndex = 0
+    val returnValLVarIndex = 1
+    val exceptionLVarIndex = 2
+    val parameterLVarIndexStart = 3
+
+
     if (!calledConstructor.isConstructor) {
       throw new IllegalArgumentException(calledConstructor + " is not a constructor")
     }
@@ -195,12 +205,12 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
     } else {
       methodBody += NEW(calledConstructor.classFile.thisType)
     }
-    methodBody += ASTORE_0 // Store object ref to local var 0
-    methodBody += ALOAD_0 // Load it again for constructor call
+    methodBody += StoreLocalVariableInstruction(calledConstructor.classFile.thisType, instanceLVarIndex) // Store object ref to local var 0
+    methodBody += LoadLocalVariableInstruction(calledConstructor.classFile.thisType, instanceLVarIndex) // Load it again for constructor call
     // Load constructor parameters, storing references to local vars
     methodBody ++= createParametersAndStoreObjectParametersToLocalVariables(
       calledConstructor,
-      localVariableIndexStart = 1
+      parameterLVarIndexStart
     )
 
     val callConstructorAndSinkCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
@@ -218,7 +228,7 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
       calledConstructor.descriptor.toJVMDescriptor
     )
 
-    callConstructorAndSinkCode += ALOAD_0 // Load reference to constructed object
+    callConstructorAndSinkCode += LoadLocalVariableInstruction(calledConstructor.classFile.thisType, instanceLVarIndex) // Load reference to constructed object
 
     // The reference to the constructed object is on the stack (because of ALOAD_0)
     // The reference type parameters need to be passed to sink -> load them.
@@ -226,17 +236,17 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
     callConstructorAndSinkCode ++= loadObjectParametersAndCallSinkAndReturn(
       calledConstructor.parameterTypes,
       sinkId,
-      localVariableIndexOffset = 1
+      parameterLVarIndexStart
     )
 
     // Handle Exception: pass everything to exception sink (including exception, but not uninitialized object)
     val exceptionHandlingCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
-    exceptionHandlingCode += ASTORE_0 // Overrides reference to created object (that is unusable, because of exception)
-    exceptionHandlingCode += ALOAD_0
+    exceptionHandlingCode += StoreLocalVariableInstruction(ObjectType.Throwable, exceptionLVarIndex) // Store Exception
+    exceptionHandlingCode += LoadLocalVariableInstruction(ObjectType.Throwable, exceptionLVarIndex) // Load Exception
     exceptionHandlingCode ++= loadObjectParametersAndCallSinkAndReturn(
       calledConstructor.parameterTypes,
       exceptionSinkId,
-      localVariableIndexOffset = 1
+      parameterLVarIndexStart
     )
 
     methodBody ++= tryCatchBlock(
@@ -268,18 +278,23 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
                                          exceptionSinkId: FullMethodIdentifier
                                         ): METHOD[_] = {
 
+    val instanceLVarIndex = 0
+    val returnValLVarIndex = 1
+    val exceptionLVarIndex = 2
+    val parameterLVarIndexStart = 3
+
     if (instanceMethod.isStatic) {
       throw new IllegalArgumentException(instanceMethod + " is not an instance method")
     }
 
     val methodBody = mutable.ArrayBuilder.make[CodeElement[Nothing]]
 
-    methodBody ++= createInstanceAndStoreInLocalVar(instanceMethod, 0)
+    methodBody ++= createInstanceAndStoreInLocalVar(instanceMethod, instanceLVarIndex)
 
     // Get reference to callee object
-    methodBody += ALOAD_0
-    // Load parameters for instance method  (starting at local variable 2 because we need to store reference to callee object (in 0) and exception (in 1))
-    methodBody ++= createParametersAndStoreObjectParametersToLocalVariables(instanceMethod, localVariableIndexStart = 2)
+    methodBody += LoadLocalVariableInstruction(instanceMethod.classFile.thisType, instanceLVarIndex)
+    // Load parameters for instance method
+    methodBody ++= createParametersAndStoreObjectParametersToLocalVariables(instanceMethod, parameterLVarIndexStart)
 
     // Body of try-catch block containing method & sink call
     val instanceMethodAndSinkCall = mutable.ArrayBuilder.make[CodeElement[Nothing]]
@@ -289,25 +304,25 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
     instanceMethodAndSinkCall += INVOKEVIRTUAL(instanceMethod.classFile.thisType, instanceMethod.name, instanceMethod.descriptor)
     // Load return value as second parameter for sink (if exists)
     if (!instanceMethod.descriptor.returnType.isVoidType) {
-      instanceMethodAndSinkCall += StoreLocalVariableInstruction(instanceMethod.descriptor.returnType.asFieldType, 1)
-      instanceMethodAndSinkCall += ALOAD_0
-      instanceMethodAndSinkCall += LoadLocalVariableInstruction(instanceMethod.descriptor.returnType.asFieldType, 1)
+      instanceMethodAndSinkCall += StoreLocalVariableInstruction(instanceMethod.descriptor.returnType.asFieldType, returnValLVarIndex)
+      instanceMethodAndSinkCall += LoadLocalVariableInstruction(instanceMethod.classFile.thisType, instanceLVarIndex)
+      instanceMethodAndSinkCall += LoadLocalVariableInstruction(instanceMethod.descriptor.returnType.asFieldType, returnValLVarIndex)
     } else {
       // Load reference of callee object in order to pass it to sink
-      instanceMethodAndSinkCall += ALOAD_0
+      instanceMethodAndSinkCall += LoadLocalVariableInstruction(instanceMethod.classFile.thisType, instanceLVarIndex)
     }
     // Load references of object type parameters, pass callee reference and the loaded references to sink, return
-    instanceMethodAndSinkCall ++= loadObjectParametersAndCallSinkAndReturn(instanceMethod.parameterTypes, sinkId, localVariableIndexOffset = 2)
+    instanceMethodAndSinkCall ++= loadObjectParametersAndCallSinkAndReturn(instanceMethod.parameterTypes, sinkId, parameterLVarIndexStart)
 
     // Handle Exception: pass everything to exception sink (including callee instance and exception)
     val exceptionHandlingCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
-    exceptionHandlingCode += ASTORE_1 // Store exception in local var 1
-    exceptionHandlingCode += ALOAD_0 // Load callee object reference from local var 0
-    exceptionHandlingCode += ALOAD_1 // Load exception
+    exceptionHandlingCode += StoreLocalVariableInstruction(ObjectType.Throwable, exceptionLVarIndex) // Store exception
+    exceptionHandlingCode += LoadLocalVariableInstruction(instanceMethod.classFile.thisType, instanceLVarIndex) // Load callee object reference
+    exceptionHandlingCode += LoadLocalVariableInstruction(ObjectType.Throwable, exceptionLVarIndex) // Load exception
     exceptionHandlingCode ++= loadObjectParametersAndCallSinkAndReturn(
       instanceMethod.parameterTypes,
       exceptionSinkId,
-      localVariableIndexOffset = 2
+      parameterLVarIndexStart
     )
 
     methodBody ++= tryCatchBlock(
@@ -328,11 +343,8 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
                                                localVarIndex: Int
                                               ): Array[CodeElement[Nothing]] = {
 
-    val instantiationCode: Array[CodeElement[Nothing]] = parameterGenerator.generateInstance(calledMethod.classFile.thisType, calledMethod)
-    val code = new Array[CodeElement[Nothing]](instantiationCode.length + 1)
-    instantiationCode.copyToArray(code)
-    code(instantiationCode.length) = ASTORE.canonicalRepresentation(localVarIndex)
-    code
+    parameterGenerator.generateInstance(calledMethod.classFile.thisType, calledMethod) ++
+      Array[CodeElement[Nothing]](StoreLocalVariableInstruction(calledMethod.classFile.thisType, localVarIndex))
   }
 
   private def createParametersAndStoreObjectParametersToLocalVariables(calledMethod: Method,
@@ -344,10 +356,10 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
     // Load/construct parameters for method call
     for (paramType <- calledMethod.descriptor.parameterTypes) {
       paramType match {
-        case _: ReferenceType =>
+        case t: ReferenceType =>
           methodBody ++= parameterGenerator.generateParameter(paramType) // TODO: Change to generation with context
-          methodBody += ASTORE(localVarIndex)
-          methodBody += ALOAD(localVarIndex)
+          methodBody += StoreLocalVariableInstruction(t, localVarIndex)
+          methodBody += LoadLocalVariableInstruction(t, localVarIndex)
           localVarIndex += 1
         case _: BaseType =>
           // Place default value on stack (base types aren't constructed in prior step)
@@ -364,8 +376,8 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
     parameterList
       .filter(parameter => parameter.isReferenceType)
       .zipWithIndex
-      .map[CodeElement[Nothing]] { case (_: FieldType, localVariableIndex: Int) =>
-        ALOAD(localVariableIndex + localVariableIndexOffset)
+      .map[CodeElement[Nothing]] { case (t: FieldType, localVariableIndex: Int) =>
+        LoadLocalVariableInstruction(t, localVariableIndex + localVariableIndexOffset)
       }
   }
 
