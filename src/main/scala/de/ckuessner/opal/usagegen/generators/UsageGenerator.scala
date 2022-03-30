@@ -1,9 +1,10 @@
 package de.ckuessner.opal.usagegen.generators
 
+import de.ckuessner.opal.usagegen.UsageGeneratorCli.Config
 import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.generateCallerMethodName
-import de.ckuessner.opal.usagegen.generators.classes.EntryPointClassGenerator
-import de.ckuessner.opal.usagegen.generators.methods.MethodCallGenerator
-import de.ckuessner.opal.usagegen.{CallerClass, CallerMethod, EntryPointMethod, FullMethodIdentifier, SinkMethod}
+import de.ckuessner.opal.usagegen.generators.methods.{MethodCallGenerator, SinkMethodGenerator}
+import de.ckuessner.opal.usagegen._
+import de.ckuessner.opal.usagegen.generators.methods.SinkMethodGenerator.{generateExceptionSinkMethod, generateSinkMethod}
 import org.opalj.br.analyses.Project
 import org.opalj.br.{ClassFile, Method}
 import org.opalj.collection.immutable.RefArray
@@ -12,19 +13,18 @@ import scala.language.postfixOps
 
 class UsageGenerator(private val project: Project[_],
                      private val methodCallGenerator: MethodCallGenerator,
-                     val callerClassBaseName: String,
-                     val sinkClassPackage: String,
-                     val sinkClassName: String
+                     config: Config
                     ) {
 
-  def generateDummyUsage: RefArray[CallerClass] = {
+  def generateCallersAndSinks: RefArray[(CallerClass, SinkClass)] = {
     // Generate caller methods with sinks and collect the caller methods in one class per package
     val callerClasses = project.allProjectClassFiles
       .groupBy(_.thisType.packageName)
-      .map { case (packageName, classFilesInPackage) =>
+      .map { case (calleePackageName, classFilesInPackage) =>
         classFilesInPackage.iterator
           .map { calleeClassFile: ClassFile =>
-            val callerClassName = s"$callerClassBaseName$$${calleeClassFile.thisType.simpleName}"
+            val callerClassName = s"${config.callerClassBaseName}$$${calleeClassFile.thisType.simpleName}"
+            val sinkClassName = s"${config.sinkClassBaseName}$$${calleeClassFile.thisType.simpleName}"
 
             // Generate usage for methods (including constructor methods)
             val callerMethods = calleeClassFile.methods
@@ -35,31 +35,43 @@ class UsageGenerator(private val project: Project[_],
                 // Name of the method that calls the library method
                 val callerMethodName = generateCallerMethodName(method.classFile, method, uniqueNumber)
                 // Method identifier for the caller method
-                val callerMethodId = FullMethodIdentifier(packageName, callerClassName, callerMethodName, "()V")
+                val callerMethodId = FullMethodIdentifier(calleePackageName, callerClassName, callerMethodName, "()V")
 
-                val sinkMethodBaseName = calleeClassFile.thisType.packageName.replace('/', '_') + "___" + callerMethodName
-                val sinkMethod = SinkGenerator.generateSinkMethod(sinkClassPackage, sinkClassName, sinkMethodBaseName, method)
-                val exceptionSinkMethod = SinkGenerator.generateExceptionSinkMethod(sinkClassPackage, sinkClassName, sinkMethodBaseName + "_exception", method)
-
-                // Generate caller method for `method`
-                generateCallerMethod(method, callerMethodId, sinkMethod, exceptionSinkMethod)
+                // Generate caller method with attached sink methods
+                generateCallerAndSinkMethods(method, callerMethodId, sinkClassName)
               })
 
-            CallerClass(
-              packageName,
+            // Unpack sink methods into sink class
+            val sinkClass = SinkClass(
+              calleePackageName,
+              sinkClassName,
+              callerMethods.map(_.sink) ++ callerMethods.map(_.exceptionSink)
+            )
+
+            // Collect sink methods into sink class
+            val callerClass = CallerClass(
+              calleePackageName,
               callerClassName,
               RefArray._UNSAFE_from(callerMethods.toArray),
             )
+
+            (callerClass, sinkClass)
           }
       }
 
     RefArray._UNSAFE_from(callerClasses.flatten.toArray)
   }
 
-  private def generateCallerMethod(method: Method,
+  private def generateCallerAndSinkMethods(method: Method,
                                    callerMethodId: FullMethodIdentifier,
-                                   sink: SinkMethod,
-                                   exceptionSink: SinkMethod): CallerMethod = {
+                                   sinkClassName: String
+                                   ): CallerMethod = {
+
+    val calleeType = method.classFile.thisType
+    val sinkMethodBaseName = callerMethodId.packageName.replace('/', '_') + "___" + callerMethodId.methodName
+
+    val sink = generateSinkMethod(calleeType.packageName, sinkClassName, sinkMethodBaseName, method)
+    val exceptionSink = generateExceptionSinkMethod(calleeType.packageName, sinkClassName, sinkMethodBaseName + "_exception", method)
 
     methodCallGenerator.generateCallerMethod(method, callerMethodId, sink, exceptionSink)
   }

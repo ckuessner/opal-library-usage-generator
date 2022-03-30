@@ -1,36 +1,14 @@
-package de.ckuessner.opal.usagegen.generators
+package de.ckuessner.opal.usagegen.generators.methods
 
 import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.generateMethodSignature
-import de.ckuessner.opal.usagegen.{CallerClass, FullMethodIdentifier, SinkClass, SinkMethod}
+import de.ckuessner.opal.usagegen.{FullMethodIdentifier, SinkMethod}
 import org.opalj.ba.{CODE, METHOD, PUBLIC}
-import org.opalj.br._
 import org.opalj.br.instructions.RETURN
-import org.opalj.collection.immutable.RefArray
+import org.opalj.br.{Method, ObjectType, Type, VoidType}
 
 import scala.collection.mutable
-import scala.language.postfixOps
 
-object SinkGenerator {
-  /**
-   * Generate a Sink class with the given className and packageName using the sink methods of the callerClasses.
-   * The packageName and className of the sinks in the caller classes are not checked!
-   *
-   * @param packageName   The name of the package containing the sink class.
-   * @param className     The name of the sink class.
-   * @param callerClasses The source of the sink methods.
-   * @return A SinkClass containing the sink methods from callerClasses.
-   */
-  def generateSinkClass(packageName: String, className: String, callerClasses: RefArray[CallerClass]): SinkClass = {
-    val sinkMethods = callerClasses
-      .flatMap(_.callerMethods)
-      .flatMap(callerMethod => {
-        List(callerMethod.sink, callerMethod.exceptionSink)
-      })
-
-    SinkClass(packageName, className, sinkMethods)
-  }
-
-  // TODO: This could be refactored into a SinkClass container with an addSinkMethod method
+object SinkMethodGenerator {
   def generateSinkMethod(sinkClassPackage: String,
                          sinkClassName: String,
                          sinkMethodName: String,
@@ -77,7 +55,7 @@ object SinkGenerator {
 
     // Sink method body
     val sinkMethodBody = METHOD(
-      PUBLIC STATIC,
+      PUBLIC.STATIC,
       sinkMethodName,
       descriptor,
       CODE(RETURN)

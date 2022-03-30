@@ -25,10 +25,9 @@ object UsageGeneratorCli extends App {
                     runBytecode: Boolean = false,
                     runtimeJars: Seq[File] = Seq.empty,
                     verbose: Boolean = false,
-                    callerClassName: String = "___METHOD_CALLER___",
-                    instanceProviderClassName: String = "___INSTANCE_PROVIDER___",
-                    sinkClassPackage: String = "",
-                    sinkClassName: String = "___SINK___",
+                    callerClassBaseName: String = "___METHOD_CALLER___",
+                    instanceProviderClassBaseName: String = "___INSTANCE_PROVIDER___",
+                    sinkClassBaseName: String = "___SINK___",
                     entryPointClassPackage: String = "",
                     entryPointClassName: String = "___TEST_RUNNER_ENTRYPOINT___",
                     entryPointMethodName: String = "run",
@@ -113,7 +112,7 @@ object UsageGeneratorCli extends App {
     // Extract sources of instances for types consumed by library methods (either as parameter, or as instance for instance methods)
     val instanceSourcesMap = InstanceSearcher(project, RefArray._UNSAFE_from[GeneratedClass](concreteSubclasses.toArray)).typeToInstanceSourcesMap
     // Generate classes with methods providing instances for used types
-    val instanceProviderGenerator = InstanceProviderGenerator(DefaultValueParameterGenerator, config.instanceProviderClassName)
+    val instanceProviderGenerator = InstanceProviderGenerator(DefaultValueParameterGenerator, config.instanceProviderClassBaseName)
     val instanceProviderClasses = instanceProviderGenerator.generateInstanceProviderClasses(instanceSourcesMap.flatMap(_._2))
 
     val parameterGenerator = new InstanceProviderBasedParameterGenerator(
@@ -127,18 +126,17 @@ object UsageGeneratorCli extends App {
     val usageGenerator = new UsageGenerator(
       project,
       new MethodCallGenerator(parameterGenerator, concreteSubclassMap),
-      config.callerClassName, config.sinkClassPackage, config.sinkClassName
+      config
     )
-    val callerClasses = usageGenerator.generateDummyUsage
-    // Generate sink class containing all sink methods used by caller methods
-    val sinkClass = SinkGenerator.generateSinkClass(config.sinkClassPackage, config.sinkClassName, callerClasses)
+    // Generate callers and sinks
+    val callersAndSinks = usageGenerator.generateCallersAndSinks
     // Generate entry point class that calls all caller methods (avoiding use of reflection)
     val entryPointClass = EntryPointClassGenerator.generateEntrypointClass(
       FullMethodIdentifier(config.entryPointClassPackage, config.entryPointClassName, config.entryPointMethodName, "()V"),
-      callerClasses
+      callersAndSinks.map(_._1)
     )
 
-    compileAndCreateJar(config, entryPointClass, sinkClass, callerClasses, parameterGenerator.generatedClasses, instanceProviderClasses, concreteSubclasses)
+    compileAndCreateJar(config, entryPointClass, callersAndSinks, parameterGenerator.generatedClasses, instanceProviderClasses, concreteSubclasses)
 
     if (config.runBytecode) {
       runBytecode(config)
@@ -176,19 +174,18 @@ object UsageGeneratorCli extends App {
 
   private def compileAndCreateJar(config: Config,
                                   entryPointClass: EntryPointClass,
-                                  sinkClass: SinkClass,
-                                  callerClasses: Iterable[CallerClass],
+                                  callersAndSinks: Iterable[(CallerClass, SinkClass)],
                                   parameterGeneratorClasses: Iterable[GeneratedClass],
                                   instanceProviderClasses: InstanceProviderClasses,
                                   concreteSubclasses: Iterable[ConcreteSubclass]
                                  ): Unit = {
 
-    // Class that is called when generated jar is run using MANIFEST main. Calls all caller classes.
+    // Class that is called when generated jar is run using MANIFEST main. Calls performCalls on all caller classes.
     val compiledEntryPointClass = Compiler.compile(entryPointClass)
-    // Class that contains all sink methods.
-    val compiledSinkClass = Compiler.compile(sinkClass)
-    // Classes with methods that each call one method of the tested library.
-    val compiledCallerClasses = callerClasses.map(Compiler.compile(_)).toList
+    // Sink classes and caller classes
+    val compiledCallerAndSinkClasses = callersAndSinks.flatMap { case (callerClass, sinkClass) =>
+      Seq(Compiler.compile(callerClass), Compiler.compile(sinkClass))
+    }
     // Classes that provide parameters
     val compiledParameterGeneratorClasses = parameterGeneratorClasses.map(Compiler.compile(_))
     // Classes that contain methods that return an instance of a specific type.
@@ -198,11 +195,10 @@ object UsageGeneratorCli extends App {
 
     val classes: Iterable[ClassByteCode] =
       Seq(compiledEntryPointClass) ++
-        (Seq(compiledSinkClass) ++
-          (compiledCallerClasses ++
-            (compiledParameterGeneratorClasses ++
-              (compiledInstanceProviderClasses ++
-                compiledConcreteSubclasses.view))))
+        (compiledCallerAndSinkClasses ++
+          (compiledParameterGeneratorClasses ++
+            (compiledInstanceProviderClasses ++
+              compiledConcreteSubclasses.view)))
 
     JarFileGenerator.writeClassFilesToJarFile(
       config.outputJarFile,
