@@ -1,12 +1,11 @@
 package de.ckuessner.opal.usagegen
 
-import de.ckuessner.opal.usagegen.Compilable.{generatedClassCompiler, opalClassCompiler}
+import de.ckuessner.opal.usagegen.Compilable.generatedClassCompiler
 import de.ckuessner.opal.usagegen.analyses.InstanceSearcher
 import de.ckuessner.opal.usagegen.generators._
 import de.ckuessner.opal.usagegen.generators.classes.{ConcreteSubclassGenerator, EntryPointClassGenerator}
 import de.ckuessner.opal.usagegen.generators.methods.MethodCallGenerator
 import de.ckuessner.opal.usagegen.generators.parameters.{DefaultValueParameterGenerator, InstanceProviderBasedParameterGenerator, InstanceProviderClasses, InstanceProviderGenerator}
-import org.opalj.ba.CLASS
 import org.opalj.br.analyses.Project
 import org.opalj.collection.immutable.RefArray
 import org.opalj.log.{ConsoleOPALLogger, GlobalLogContext, OPALLogger}
@@ -176,7 +175,7 @@ object UsageGeneratorCli extends App {
   }
 
   private def compileAndCreateJar(config: Config,
-                                  entryPointClass: CLASS[_],
+                                  entryPointClass: EntryPointClass,
                                   sinkClass: SinkClass,
                                   callerClasses: Iterable[CallerClass],
                                   parameterGeneratorClasses: Iterable[GeneratedClass],

@@ -2,7 +2,7 @@ package de.ckuessner.opal.usagegen
 
 import de.ckuessner.opal.usagegen.analyses.{InstanceSource, StubSubclassInstanceSource}
 import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.packageAndClassToJvmClassName
-import de.ckuessner.opal.usagegen.generators.classes.ClassGenerator
+import de.ckuessner.opal.usagegen.generators.classes.{ClassGenerator, EntryPointClassGenerator}
 import org.opalj.ba.{CLASS, METHODS, PUBLIC}
 import org.opalj.br.ClassFile
 import org.opalj.collection.immutable.RefArray
@@ -28,8 +28,21 @@ case class SinkClass(packageName: String, className: String, sinkMethods: RefArr
   def methods: RefArray[GeneratedMethod] = sinkMethods
 }
 
-case class CallerClass(packageName: String, className: String, callerMethods: RefArray[CallerMethod]) extends GeneratedClass {
-  def methods: RefArray[GeneratedMethod] = callerMethods
+case class EntryPointClass(packageName: String, className: String, mainMethod: AuxiliaryMethod, entryPointMethod: EntryPointMethod) extends GeneratedClass {
+  override def methods: RefArray[GeneratedMethod] = RefArray(mainMethod, entryPointMethod)
+}
+
+case class CallerClass(packageName: String, className: String, callerMethods: RefArray[CallerMethod], entryPointMethod: EntryPointMethod) extends GeneratedClass {
+  def methods: RefArray[GeneratedMethod] = RefArray[GeneratedMethod](entryPointMethod) ++ callerMethods
+}
+
+object CallerClass {
+  def apply(packageName: String, className: String, callerMethods: RefArray[CallerMethod]): CallerClass = {
+    CallerClass(
+      packageName, className, callerMethods,
+      EntryPointClassGenerator.generateCallerClassEntryPointMethod(packageName, className, callerMethods)
+    )
+  }
 }
 
 case class InstanceProviderClass(packageName: String,

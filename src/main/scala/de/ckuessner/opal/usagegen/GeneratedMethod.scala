@@ -14,6 +14,8 @@ sealed trait GeneratedMethod {
 
 case class CallerMethod(methodId: FullMethodIdentifier, methodBody: METHOD[_], sink: SinkMethod, exceptionSink: SinkMethod) extends GeneratedMethod
 
+case class EntryPointMethod(methodId: FullMethodIdentifier, methodBody: METHOD[_]) extends GeneratedMethod
+
 case class SinkMethod(methodId: FullMethodIdentifier, methodBody: METHOD[_]) extends GeneratedMethod
 
 /**

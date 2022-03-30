@@ -1,8 +1,9 @@
 package de.ckuessner.opal.usagegen.generators
 
 import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.generateCallerMethodName
+import de.ckuessner.opal.usagegen.generators.classes.EntryPointClassGenerator
 import de.ckuessner.opal.usagegen.generators.methods.MethodCallGenerator
-import de.ckuessner.opal.usagegen.{CallerClass, CallerMethod, FullMethodIdentifier, SinkMethod}
+import de.ckuessner.opal.usagegen.{CallerClass, CallerMethod, EntryPointMethod, FullMethodIdentifier, SinkMethod}
 import org.opalj.br.analyses.Project
 import org.opalj.br.{ClassFile, Method}
 import org.opalj.collection.immutable.RefArray
@@ -47,7 +48,7 @@ class UsageGenerator(private val project: Project[_],
             CallerClass(
               packageName,
               callerClassName,
-              RefArray._UNSAFE_from(callerMethods.toArray)
+              RefArray._UNSAFE_from(callerMethods.toArray),
             )
           }
       }
