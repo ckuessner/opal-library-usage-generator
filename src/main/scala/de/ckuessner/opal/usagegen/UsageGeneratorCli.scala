@@ -32,7 +32,8 @@ object UsageGeneratorCli extends App {
                     sinkClassName: String = "___SINK___",
                     entryPointClassPackage: String = "",
                     entryPointClassName: String = "___TEST_RUNNER_ENTRYPOINT___",
-                    entryPointMethodName: String = "run"
+                    entryPointMethodName: String = "run",
+                    catchExceptionInRun: Boolean = false
                    )
 
   val builder = OParser.builder[Config]
@@ -162,11 +163,15 @@ object UsageGeneratorCli extends App {
 
     val entryPointClass = testedProjectClassLoader.loadClass(entryPointFqnClassName)
     val entryPointMethod = entryPointClass.getMethod(config.entryPointMethodName)
-    try {
+    if (config.catchExceptionInRun) {
+      try {
+        entryPointMethod.invoke(null)
+      } catch {
+        case e: InvocationTargetException =>
+          System.err.println(entryPointMethod.getName + " threw " + e.getTargetException.toString)
+      }
+    } else {
       entryPointMethod.invoke(null)
-    } catch {
-      case e: InvocationTargetException =>
-        System.err.println(entryPointMethod.getName + " threw " + e.getTargetException.toString)
     }
   }
 
