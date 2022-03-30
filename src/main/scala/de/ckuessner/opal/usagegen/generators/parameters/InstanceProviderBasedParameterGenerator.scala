@@ -80,19 +80,30 @@ class InstanceProviderBasedParameterGenerator(val parameterGeneratorPackageName:
 
   override def generateParameter(parameterType: FieldType): Array[CodeElement[Nothing]] = {
     if (parameterType.isObjectType) {
-      typeToProviderMethodMap.get(parameterType.asObjectType) match {
-        case Some(providerMethod) =>
-          return Array(
-            INVOKESTATIC(
-              providerMethod.methodId.jvmClassName,
-              isInterface = false,
-              methodNameForType(parameterType.asObjectType),
-              MethodDescriptor.withNoArgs(parameterType.asObjectType).toJVMDescriptor
-            ))
-        case None => System.err.println("InstanceProviderBasedParameterGenerator: " + parameterType + " is requested but not known")
-      }
+      val instanceGenCode = generateInstance(parameterType.asObjectType)
+      // If the instanceGenCode might return a non-null value, stick with it. Otherwise use the default provider
+      if (instanceGenCode.isDefined) return instanceGenCode.get
     }
 
     defaultValueForFieldType(parameterType)
   }
+
+  override def generateInstance(objectType: ObjectType): Option[Array[CodeElement[Nothing]]] =
+    typeToProviderMethodMap.get(objectType) match {
+      case Some(providerMethod) =>
+        Some(Array(
+          INVOKESTATIC(
+            providerMethod.methodId.jvmClassName,
+            isInterface = false,
+            methodNameForType(objectType),
+            MethodDescriptor.withNoArgs(objectType).toJVMDescriptor
+          )))
+      case None =>
+        // TODO: Maybe using a real logging library would be better here...
+        Console.err.println("InstanceProviderBasedParameterGenerator: " + objectType + " is requested but not known")
+        None
+    }
+
+  override def generateInstance(objectType: ObjectType, calledInstanceMethod: Method): Option[Array[CodeElement[Nothing]]] =
+    generateInstance(objectType)
 }

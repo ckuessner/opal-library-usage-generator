@@ -4,9 +4,9 @@ import de.ckuessner.opal.usagegen.generators.ByteCodeGenerationHelpers.tryCatchB
 import de.ckuessner.opal.usagegen.generators.parameters.ParameterGenerator
 import de.ckuessner.opal.usagegen.{CallerMethod, ConcreteSubclass, FullMethodIdentifier, SinkMethod}
 import org.opalj.ba.CodeElement._
-import org.opalj.ba.{CODE, CodeElement, METHOD, PUBLIC}
+import org.opalj.ba.{CODE, CodeElement, LabelElement, METHOD, PUBLIC}
 import org.opalj.br._
-import org.opalj.br.instructions.{INVOKESPECIAL, INVOKESTATIC, INVOKEVIRTUAL, LoadLocalVariableInstruction, NEW, RETURN, StoreLocalVariableInstruction}
+import org.opalj.br.instructions.{IFNONNULL, INVOKESPECIAL, INVOKESTATIC, INVOKEVIRTUAL, LoadLocalVariableInstruction, NEW, RETURN, StoreLocalVariableInstruction}
 import org.opalj.collection.immutable.RefArray
 
 import scala.collection.mutable
@@ -287,12 +287,30 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
       throw new IllegalArgumentException(instanceMethod + " is not an instance method")
     }
 
+    val typeOfCalleeInstance = instanceMethod.classFile.thisType
+
     val methodBody = mutable.ArrayBuilder.make[CodeElement[Nothing]]
 
-    methodBody ++= createInstanceAndStoreInLocalVar(instanceMethod, instanceLVarIndex)
+    val instanceGenerationCode = createInstanceAndStoreInLocalVar(instanceMethod, instanceLVarIndex)
+    // No instance can be generated, don't attempt to generate any code! // TODO: Add logging for this?
+    if (instanceGenerationCode.isEmpty) return METHOD(
+      PUBLIC.STATIC,
+      callerMethodName,
+      "()V",
+      CODE(RETURN) // Simply return, nothing to do without an instance
+    )
+
+    // Add instance generation code that might still produce null values
+    methodBody ++= instanceGenerationCode.get
+    // Check if instance is null, return without calling instance method if instance is null
+    val nonNullSymbol = Symbol("INSTANCE NOT NULL")
+    methodBody += LoadLocalVariableInstruction(typeOfCalleeInstance, instanceLVarIndex)
+    methodBody += IFNONNULL(nonNullSymbol)
+    methodBody += RETURN // Instance is null -> Return to avoid NPE
+    methodBody += LabelElement(nonNullSymbol)
 
     // Get reference to callee object
-    methodBody += LoadLocalVariableInstruction(instanceMethod.classFile.thisType, instanceLVarIndex)
+    methodBody += LoadLocalVariableInstruction(typeOfCalleeInstance, instanceLVarIndex)
     // Load parameters for instance method
     methodBody ++= createParametersAndStoreObjectParametersToLocalVariables(instanceMethod, parameterLVarIndexStart)
 
@@ -301,15 +319,15 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
 
     // Invoke instance method
     // Call instance method on callee object
-    instanceMethodAndSinkCall += INVOKEVIRTUAL(instanceMethod.classFile.thisType, instanceMethod.name, instanceMethod.descriptor)
+    instanceMethodAndSinkCall += INVOKEVIRTUAL(typeOfCalleeInstance, instanceMethod.name, instanceMethod.descriptor)
     // Load return value as second parameter for sink (if exists)
     if (!instanceMethod.descriptor.returnType.isVoidType) {
       instanceMethodAndSinkCall += StoreLocalVariableInstruction(instanceMethod.descriptor.returnType.asFieldType, returnValLVarIndex)
-      instanceMethodAndSinkCall += LoadLocalVariableInstruction(instanceMethod.classFile.thisType, instanceLVarIndex)
+      instanceMethodAndSinkCall += LoadLocalVariableInstruction(typeOfCalleeInstance, instanceLVarIndex)
       instanceMethodAndSinkCall += LoadLocalVariableInstruction(instanceMethod.descriptor.returnType.asFieldType, returnValLVarIndex)
     } else {
       // Load reference of callee object in order to pass it to sink
-      instanceMethodAndSinkCall += LoadLocalVariableInstruction(instanceMethod.classFile.thisType, instanceLVarIndex)
+      instanceMethodAndSinkCall += LoadLocalVariableInstruction(typeOfCalleeInstance, instanceLVarIndex)
     }
     // Load references of object type parameters, pass callee reference and the loaded references to sink, return
     instanceMethodAndSinkCall ++= loadObjectParametersAndCallSinkAndReturn(instanceMethod.parameterTypes, sinkId, parameterLVarIndexStart)
@@ -317,7 +335,7 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
     // Handle Exception: pass everything to exception sink (including callee instance and exception)
     val exceptionHandlingCode = mutable.ArrayBuilder.make[CodeElement[Nothing]]
     exceptionHandlingCode += StoreLocalVariableInstruction(ObjectType.Throwable, exceptionLVarIndex) // Store exception
-    exceptionHandlingCode += LoadLocalVariableInstruction(instanceMethod.classFile.thisType, instanceLVarIndex) // Load callee object reference
+    exceptionHandlingCode += LoadLocalVariableInstruction(typeOfCalleeInstance, instanceLVarIndex) // Load callee object reference
     exceptionHandlingCode += LoadLocalVariableInstruction(ObjectType.Throwable, exceptionLVarIndex) // Load exception
     exceptionHandlingCode ++= loadObjectParametersAndCallSinkAndReturn(
       instanceMethod.parameterTypes,
@@ -341,10 +359,14 @@ class MethodCallGenerator(private val parameterGenerator: ParameterGenerator,
 
   private def createInstanceAndStoreInLocalVar(calledMethod: Method,
                                                localVarIndex: Int
-                                              ): Array[CodeElement[Nothing]] = {
+                                              ): Option[Array[CodeElement[Nothing]]] = {
 
-    parameterGenerator.generateInstance(calledMethod.classFile.thisType, calledMethod) ++
-      Array[CodeElement[Nothing]](StoreLocalVariableInstruction(calledMethod.classFile.thisType, localVarIndex))
+    parameterGenerator.generateInstance(calledMethod.classFile.thisType, calledMethod) match {
+      case Some(generationCode) =>
+        Some(generationCode ++
+          Array[CodeElement[Nothing]](StoreLocalVariableInstruction(calledMethod.classFile.thisType, localVarIndex)))
+      case None => None
+    }
   }
 
   private def createParametersAndStoreObjectParametersToLocalVariables(calledMethod: Method,

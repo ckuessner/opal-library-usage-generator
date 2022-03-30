@@ -61,36 +61,34 @@ trait ParameterGenerator {
   def generateParameter(parameterType: FieldType): Array[CodeElement[Nothing]]
 
   /**
-   * Generate instance for instance method call.
+   * Generate instance for instance method call if non-null reference is possible.
    *
-   * If no instance can be generated, this simply pushes null onto the stack.
+   * If it is known that no instance can be generated, this returns None.
    *
    * NOTE: The returned bytecode is expected not to use any local variables.
    *
    * @param objectType The type of the generated instance
-   * @return The bytecode that generates an object of the provided object type
+   * @return The bytecode that generates an object of the provided object type, or None.
    *
    */
-  def generateInstance(objectType: ObjectType): Array[CodeElement[Nothing]] = {
-    generateParameter(objectType)
-  }
+  def generateInstance(objectType: ObjectType): Option[Array[CodeElement[Nothing]]]
 
   /**
-   * Generate instance for instance method call.
+   * Generate instance for instance method call if non-null reference is possible.
    *
-   * If no instance can be generated, this simply pushes null onto the stack.
+   * If it is known that no instance can be generated, this returns None.
+   *
    * The calledInstanceMethod parameter can be used for context aware instance creation
    *
    * NOTE: The returned bytecode is expected not to use any local variables.
    *
    * @param objectType           The type of the generated instance
    * @param calledInstanceMethod The method that will be called on the generated instance
-   * @return The bytecode that generates an object of the provided object type
+   * @return The bytecode that generates an object of the provided object type, or None
    *
    */
-  def generateInstance(objectType: ObjectType, calledInstanceMethod: Method): Array[CodeElement[Nothing]] = {
-    generateParameter(objectType)
-  }
+  def generateInstance(objectType: ObjectType, calledInstanceMethod: Method): Option[Array[CodeElement[Nothing]]]
+
 }
 
 object ParameterGenerator {
